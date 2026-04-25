@@ -72,7 +72,7 @@ QPushButton {
     border: none;
     border-radius: 6px;
     padding: 6px 16px;
-    font-size: 12px;
+    font-size: 13px;
 }
 QPushButton:hover {
     background-color: #3a3a7a;
@@ -117,7 +117,7 @@ QPushButton:pressed {
 
 #titleLabel {
     color: #c0c0c0;
-    font-size: 9px;
+    font-size: 11px;
 }
 
 /* ── 信息栏 ──────────────────────────── */
@@ -172,7 +172,7 @@ QProgressBar {
     border-radius: 4px;
     text-align: center;
     color: #e0e0e0;
-    font-size: 10px;
+    font-size: 11px;
 }
 QProgressBar::chunk {
     background-color: #4a4a8a;
@@ -219,7 +219,7 @@ def main():
     app.setApplicationName("Wallpaper Manager")
     app.setStyleSheet(STYLESHEET)
 
-    font = QFont("Microsoft YaHei UI", 9)
+    font = QFont("Microsoft YaHei UI", 10)
     app.setFont(font)
 
     window = MainWindow()

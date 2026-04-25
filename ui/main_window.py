@@ -126,21 +126,21 @@ class MainWindow(QMainWindow):
 
         self.stats_label = QLabel()
         self.stats_label.setObjectName("statsLabel")
-        self.stats_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.stats_label.setStyleSheet("color: #888; font-size: 12px;")
         info_layout.addWidget(self.stats_label)
 
         info_layout.addStretch()
 
         self.selection_label = QLabel()
         self.selection_label.setObjectName("selectionLabel")
-        self.selection_label.setStyleSheet("color: #4a9eff; font-size: 11px;")
+        self.selection_label.setStyleSheet("color: #4a9eff; font-size: 12px;")
         self.selection_label.setVisible(False)
         info_layout.addWidget(self.selection_label)
 
         clear_sel_btn = QPushButton("✕ 取消选择")
         clear_sel_btn.setObjectName("clearSelBtn")
         clear_sel_btn.setFixedHeight(22)
-        clear_sel_btn.setStyleSheet("font-size: 10px; padding: 2px 8px;")
+        clear_sel_btn.setStyleSheet("font-size: 11px; padding: 2px 8px;")
         clear_sel_btn.clicked.connect(self._clear_selection)
         clear_sel_btn.setVisible(False)
         self._clear_sel_btn = clear_sel_btn
@@ -572,12 +572,37 @@ class MainWindow(QMainWindow):
     # ─── 窗口事件 ─────────────────────────────────────────────
 
     def resizeEvent(self, event):
+        """窗口大小变化时重新排列卡片（轻量级，不重新查询数据库）"""
         super().resizeEvent(event)
         if not hasattr(self, "_resize_timer"):
             self._resize_timer = QTimer()
             self._resize_timer.setSingleShot(True)
-            self._resize_timer.timeout.connect(self._load_data)
-        self._resize_timer.start(200)
+            self._resize_timer.timeout.connect(self._relayout_grid)
+        self._resize_timer.start(100)
+
+    def _relayout_grid(self):
+        """仅重新计算网格位置，不重建卡片、不查询数据库"""
+        if not self._current_wallpapers:
+            return
+
+        area_width = self.scroll_area.viewport().width() - 20
+        card_full_width = CARD_WIDTH + 16 + CARD_SPACING
+        cols = max(1, area_width // card_full_width)
+
+        # 收集当前所有卡片（保持顺序）
+        cards_in_order = []
+        for wp in self._current_wallpapers:
+            if wp.id in self._cards:
+                cards_in_order.append(self._cards[wp.id])
+
+        # 先从 grid 中移除所有卡片（不 deleteLater）
+        for card in cards_in_order:
+            self.grid_layout.removeWidget(card)
+
+        # 重新放入 grid
+        for i, card in enumerate(cards_in_order):
+            row, col = divmod(i, cols)
+            self.grid_layout.addWidget(card, row, col)
 
     def closeEvent(self, event):
         """关闭时清理后台线程"""

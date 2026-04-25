@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QSizePolicy, QSlider, QStackedWidget,
 )
-from PySide6.QtCore import Qt, QSize, QUrl
+from PySide6.QtCore import Qt, QSize, QUrl, QTimer
 from PySide6.QtGui import QPixmap, QShortcut, QKeySequence
 
 # 视频播放组件（可选导入）
@@ -79,7 +79,7 @@ class PreviewDialog(QDialog):
         ctrl_layout.addWidget(self.position_slider, 1)
 
         self.time_label = QLabel("0:00 / 0:00")
-        self.time_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.time_label.setStyleSheet("color: #888; font-size: 12px;")
         self.time_label.setFixedWidth(90)
         ctrl_layout.addWidget(self.time_label)
 
@@ -252,10 +252,14 @@ class PreviewDialog(QDialog):
             subprocess.Popen(["explorer", path])
 
     def resizeEvent(self, event):
-        """窗口大小变化时重新缩放图片"""
+        """窗口大小变化时重新缩放图片（带防抖）"""
         super().resizeEvent(event)
         if self.stack.currentIndex() == 0:
-            self._load_preview_image()
+            if not hasattr(self, "_resize_timer"):
+                self._resize_timer = QTimer()
+                self._resize_timer.setSingleShot(True)
+                self._resize_timer.timeout.connect(self._load_preview_image)
+            self._resize_timer.start(100)
 
     def closeEvent(self, event):
         """关闭时停止视频播放"""

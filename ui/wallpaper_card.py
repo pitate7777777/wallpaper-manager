@@ -60,7 +60,7 @@ class WallpaperCard(QFrame):
         self.title_label.setObjectName("titleLabel")
         self.title_label.setWordWrap(False)
         font = self.title_label.font()
-        font.setPointSize(8)
+        font.setPointSize(9)
         self.title_label.setFont(font)
         bottom.addWidget(self.title_label, 1)
 
