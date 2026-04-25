@@ -1,0 +1,589 @@
+"""主窗口 - 多选/右键菜单/多目录/缩略图/导入导出"""
+import logging
+from pathlib import Path
+
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QScrollArea, QLabel, QStatusBar, QFileDialog, QMessageBox,
+    QProgressBar, QApplication, QPushButton,
+)
+from PySide6.QtCore import Qt, QTimer, QThread, Signal
+from PySide6.QtGui import QFont
+
+from core import db
+from core.scanner import scan_directory
+from core.models import Wallpaper
+from core.thumbnail_worker import ThumbnailWorker
+from core.export_worker import ExportWorker, ImportWorker
+from config import load_config, add_wallpaper_dir
+from ui.wallpaper_card import WallpaperCard, CARD_WIDTH
+from ui.filter_bar import FilterBar
+from ui.preview_dialog import PreviewDialog
+from ui.dir_manager_dialog import DirManagerDialog
+from ui.context_menu import WallpaperContextMenu
+
+logger = logging.getLogger(__name__)
+
+CARD_SPACING = 8
+
+
+# ─── 后台工作线程 ───────────────────────────────────────────────
+
+class ScanWorker(QThread):
+    """后台扫描线程（支持多目录）"""
+    progress = Signal(int, int, str)
+    finished = Signal(dict)
+
+    def __init__(self, directories: list[str]):
+        super().__init__()
+        self.directories = directories
+
+    def run(self):
+        try:
+            combined = {"added": 0, "updated": 0, "removed": 0, "errors": 0}
+            for i, directory in enumerate(self.directories):
+                self.progress.emit(i + 1, len(self.directories), Path(directory).name)
+                stats = scan_directory(directory)
+                for k in combined:
+                    combined[k] += stats.get(k, 0)
+            self.finished.emit(combined)
+        except Exception as e:
+            self.finished.emit({"error": str(e)})
+
+
+# ─── 主窗口 ────────────────────────────────────────────────────
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("🎨 Wallpaper Manager")
+        self.setMinimumSize(900, 600)
+        self.resize(1200, 800)
+
+        # 过滤状态
+        self._search_text = ""
+        self._type_filter = ""
+        self._tag_filter = ""
+        self._favorites_only = False
+        self._order_by = "title"
+
+        # 多选状态
+        self._selected_ids: set[int] = set()
+        self._last_clicked_id: int | None = None
+
+        # 壁纸 ID → 卡片映射
+        self._cards: dict[int, WallpaperCard] = {}
+        # 当前查询结果
+        self._current_wallpapers: list[Wallpaper] = []
+
+        # 后台线程引用（防止 GC）
+        self._scan_worker = None
+        self._thumb_worker = None
+        self._export_worker = None
+        self._import_worker = None
+
+        # 右键菜单
+        self._context_menu = WallpaperContextMenu(self)
+        self._context_menu.batch_favorite.connect(self._batch_favorite)
+        self._context_menu.batch_unfavorite.connect(self._batch_unfavorite)
+        self._context_menu.batch_export.connect(self._on_export_selected)
+        self._context_menu.open_preview.connect(self._open_preview_from_context)
+        self._context_menu.open_folder.connect(self._open_folder_from_context)
+        self._context_menu.copy_path.connect(self._copy_path_from_context)
+        self._context_menu_wallpaper_id = None
+
+        self._setup_ui()
+        self._load_data()
+        self._start_thumbnail_generation()
+
+    # ─── UI 构建 ──────────────────────────────────────────────
+
+    def _setup_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # 过滤栏
+        self.filter_bar = FilterBar()
+        self.filter_bar.search_changed.connect(self._on_search)
+        self.filter_bar.type_changed.connect(self._on_type_filter)
+        self.filter_bar.tag_changed.connect(self._on_tag_filter)
+        self.filter_bar.favorites_toggled.connect(self._on_favorites)
+        self.filter_bar.order_changed.connect(self._on_order)
+        self.filter_bar.scan_clicked.connect(self._on_scan)
+        self.filter_bar.dir_manager_clicked.connect(self._on_dir_manager)
+        self.filter_bar.export_clicked.connect(self._on_export_all)
+        self.filter_bar.import_clicked.connect(self._on_import)
+        main_layout.addWidget(self.filter_bar)
+
+        # 统计 + 选择状态栏
+        info_bar = QWidget()
+        info_bar.setObjectName("infoBar")
+        info_layout = QHBoxLayout(info_bar)
+        info_layout.setContentsMargins(12, 4, 12, 4)
+
+        self.stats_label = QLabel()
+        self.stats_label.setObjectName("statsLabel")
+        self.stats_label.setStyleSheet("color: #888; font-size: 11px;")
+        info_layout.addWidget(self.stats_label)
+
+        info_layout.addStretch()
+
+        self.selection_label = QLabel()
+        self.selection_label.setObjectName("selectionLabel")
+        self.selection_label.setStyleSheet("color: #4a9eff; font-size: 11px;")
+        self.selection_label.setVisible(False)
+        info_layout.addWidget(self.selection_label)
+
+        clear_sel_btn = QPushButton("✕ 取消选择")
+        clear_sel_btn.setObjectName("clearSelBtn")
+        clear_sel_btn.setFixedHeight(22)
+        clear_sel_btn.setStyleSheet("font-size: 10px; padding: 2px 8px;")
+        clear_sel_btn.clicked.connect(self._clear_selection)
+        clear_sel_btn.setVisible(False)
+        self._clear_sel_btn = clear_sel_btn
+        info_layout.addWidget(clear_sel_btn)
+
+        main_layout.addWidget(info_bar)
+
+        # 滚动区域 + 网格
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setObjectName("scrollArea")
+
+        self.grid_widget = QWidget()
+        self.grid_layout = QGridLayout(self.grid_widget)
+        self.grid_layout.setSpacing(CARD_SPACING)
+        self.grid_layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        self.scroll_area.setWidget(self.grid_widget)
+        main_layout.addWidget(self.scroll_area, 1)
+
+        # 状态栏
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("就绪")
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setMaximumHeight(20)
+        self.status_bar.addPermanentWidget(self.progress_bar)
+
+    # ─── 数据加载 ─────────────────────────────────────────────
+
+    def _load_data(self):
+        db.init_db()
+        wallpapers = db.query_wallpapers(
+            search=self._search_text,
+            wp_type=self._type_filter,
+            tags=[self._tag_filter] if self._tag_filter else None,
+            favorites_only=self._favorites_only,
+            order_by=self._order_by,
+        )
+        self._current_wallpapers = wallpapers
+        self._populate_grid(wallpapers)
+        self._update_stats()
+        self._update_tags()
+
+    def _populate_grid(self, wallpapers: list[Wallpaper]):
+        # 清空旧卡片
+        while self.grid_layout.count():
+            item = self.grid_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._cards.clear()
+
+        if not wallpapers:
+            empty = QLabel("📭 没有找到壁纸\n\n点击「扫描」导入 Wallpaper Engine 壁纸\n或通过「目录」管理多个壁纸库")
+            empty.setAlignment(Qt.AlignCenter)
+            empty.setStyleSheet("color: #888; font-size: 14px; padding: 60px;")
+            self.grid_layout.addWidget(empty, 0, 0, 1, -1)
+            return
+
+        area_width = self.scroll_area.viewport().width() - 20
+        card_full_width = CARD_WIDTH + 16 + CARD_SPACING
+        cols = max(1, area_width // card_full_width)
+
+        for i, wp in enumerate(wallpapers):
+            row, col = divmod(i, cols)
+            card = WallpaperCard(wp)
+            card.clicked.connect(self._on_card_clicked)
+            card.ctrl_clicked.connect(self._on_card_ctrl_clicked)
+            card.shift_clicked.connect(self._on_card_shift_clicked)
+            card.favorite_toggled.connect(self._on_favorite_toggled)
+            card.context_menu_requested.connect(self._on_context_menu)
+
+            # 恢复选中状态
+            if wp.id in self._selected_ids:
+                card.set_selected(True)
+
+            self._cards[wp.id] = card
+            self.grid_layout.addWidget(card, row, col)
+
+    def _update_stats(self):
+        stats = db.get_stats()
+        parts = [f"共 {stats['total']} 张壁纸"]
+        if stats['favorites']:
+            parts.append(f"❤️ {stats['favorites']} 收藏")
+        for t, c in stats['by_type'].items():
+            emoji = {"video": "🎬", "scene": "🖼️", "web": "🌐"}.get(t, "📄")
+            parts.append(f"{emoji} {t}: {c}")
+        self.stats_label.setText("  ·  ".join(parts))
+
+    def _update_tags(self):
+        tags = db.get_all_tags()
+        self.filter_bar.update_tags(tags)
+
+    def _update_selection_ui(self):
+        """更新多选状态栏"""
+        count = len(self._selected_ids)
+        if count > 0:
+            self.selection_label.setText(f"已选择 {count} 项")
+            self.selection_label.setVisible(True)
+            self._clear_sel_btn.setVisible(True)
+        else:
+            self.selection_label.setVisible(False)
+            self._clear_sel_btn.setVisible(False)
+
+    # ─── 过滤事件 ─────────────────────────────────────────────
+
+    def _on_search(self, text: str):
+        self._search_text = text
+        self._reload_with_delay()
+
+    def _on_type_filter(self, wp_type: str):
+        self._type_filter = wp_type
+        self._load_data()
+
+    def _on_tag_filter(self, tag: str):
+        self._tag_filter = tag
+        self._load_data()
+
+    def _on_favorites(self, checked: bool):
+        self._favorites_only = checked
+        self._load_data()
+
+    def _on_order(self, order: str):
+        self._order_by = order
+        self._load_data()
+
+    def _reload_with_delay(self):
+        if not hasattr(self, "_search_timer"):
+            self._search_timer = QTimer()
+            self._search_timer.setSingleShot(True)
+            self._search_timer.timeout.connect(self._load_data)
+        self._search_timer.start(300)
+
+    # ─── 多选逻辑 ─────────────────────────────────────────────
+
+    def _on_card_clicked(self, wallpaper_id: int):
+        """普通点击：清除其他选中，打开预览"""
+        self._clear_selection()
+        self._last_clicked_id = wallpaper_id
+        self._open_preview(wallpaper_id)
+
+    def _on_card_ctrl_clicked(self, wallpaper_id: int):
+        """Ctrl+点击：切换选中"""
+        if wallpaper_id in self._selected_ids:
+            self._selected_ids.discard(wallpaper_id)
+            if wallpaper_id in self._cards:
+                self._cards[wallpaper_id].set_selected(False)
+        else:
+            self._selected_ids.add(wallpaper_id)
+            if wallpaper_id in self._cards:
+                self._cards[wallpaper_id].set_selected(True)
+        self._last_clicked_id = wallpaper_id
+        self._update_selection_ui()
+
+    def _on_card_shift_clicked(self, wallpaper_id: int):
+        """Shift+点击：范围选中"""
+        if self._last_clicked_id is None:
+            self._on_card_ctrl_clicked(wallpaper_id)
+            return
+
+        # 在当前列表中找到范围
+        ids = [wp.id for wp in self._current_wallpapers]
+        try:
+            start = ids.index(self._last_clicked_id)
+            end = ids.index(wallpaper_id)
+        except ValueError:
+            return
+
+        if start > end:
+            start, end = end, start
+
+        for i in range(start, end + 1):
+            wp_id = ids[i]
+            self._selected_ids.add(wp_id)
+            if wp_id in self._cards:
+                self._cards[wp_id].set_selected(True)
+
+        self._last_clicked_id = wallpaper_id
+        self._update_selection_ui()
+
+    def _clear_selection(self):
+        self._selected_ids.clear()
+        for card in self._cards.values():
+            card.set_selected(False)
+        self._update_selection_ui()
+
+    # ─── 右键菜单 ─────────────────────────────────────────────
+
+    def _on_context_menu(self, wallpaper_id: int, global_pos):
+        self._context_menu_wallpaper_id = wallpaper_id
+        wp = next((w for w in self._current_wallpapers if w.id == wallpaper_id), None)
+        # 如果壁纸在选中集合中，显示选中数量；否则显示单个
+        count = len(self._selected_ids) if wallpaper_id in self._selected_ids else (1 if wp else 0)
+        self._context_menu.show(global_pos, wp, count)
+
+    def _open_preview_from_context(self):
+        if self._context_menu_wallpaper_id:
+            self._open_preview(self._context_menu_wallpaper_id)
+
+    def _open_folder_from_context(self):
+        if self._context_menu_wallpaper_id:
+            wp = next((w for w in self._current_wallpapers if w.id == self._context_menu_wallpaper_id), None)
+            if wp:
+                import subprocess
+                if Path(wp.folder_path).exists():
+                    subprocess.Popen(["explorer", wp.folder_path])
+
+    def _copy_path_from_context(self):
+        if self._context_menu_wallpaper_id:
+            wp = next((w for w in self._current_wallpapers if w.id == self._context_menu_wallpaper_id), None)
+            if wp:
+                QApplication.clipboard().setText(wp.folder_path)
+                self.status_bar.showMessage("📋 路径已复制到剪贴板", 2000)
+
+    # ─── 批量操作 ─────────────────────────────────────────────
+
+    def _batch_favorite(self):
+        """批量收藏（强制设为收藏状态）"""
+        targets = self._selected_ids if self._selected_ids else {self._context_menu_wallpaper_id}
+        count = 0
+        for wp_id in targets:
+            if wp_id:
+                db.set_favorite(wp_id, True)
+                count += 1
+        self.status_bar.showMessage(f"❤️ 已收藏 {count} 项", 2000)
+        self._clear_selection()
+        self._load_data()
+
+    def _batch_unfavorite(self):
+        """批量取消收藏（强制取消收藏状态）"""
+        targets = self._selected_ids if self._selected_ids else {self._context_menu_wallpaper_id}
+        count = 0
+        for wp_id in targets:
+            if wp_id:
+                db.set_favorite(wp_id, False)
+                count += 1
+        self.status_bar.showMessage(f"🤍 已取消收藏 {count} 项", 2000)
+        self._clear_selection()
+        self._load_data()
+
+    # ─── 扫描（支持多目录）────────────────────────────────────
+
+    def _on_scan(self):
+        cfg = load_config()
+        dirs = cfg.get("wallpaper_dirs", [])
+
+        if not dirs:
+            # 无已配置目录，走单目录选择
+            directory = QFileDialog.getExistingDirectory(
+                self, "选择壁纸目录", str(Path.home()),
+            )
+            if not directory:
+                return
+            dirs = [directory]
+            add_wallpaper_dir(directory)
+
+        self._start_scan(dirs)
+
+    def _start_scan(self, directories: list[str]):
+        self._scan_worker = ScanWorker(directories)
+        self._scan_worker.finished.connect(self._on_scan_finished)
+
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setMaximum(0)  # 不确定进度
+        self.filter_bar.scan_btn.setEnabled(False)
+        self.status_bar.showMessage(f"正在扫描 {len(directories)} 个目录...")
+        self._scan_worker.start()
+
+    def _on_scan_finished(self, stats: dict):
+        self.progress_bar.setVisible(False)
+        self.filter_bar.scan_btn.setEnabled(True)
+
+        if "error" in stats:
+            QMessageBox.critical(self, "扫描失败", stats["error"])
+            self.status_bar.showMessage("扫描失败")
+            return
+
+        msg = f"✅ 扫描完成 — 新增: {stats['added']}, 更新: {stats['updated']}, 移除: {stats['removed']}"
+        if stats['errors']:
+            msg += f", 错误: {stats['errors']}"
+        self.status_bar.showMessage(msg)
+        self._load_data()
+        self._start_thumbnail_generation()
+
+    # ─── 目录管理 ─────────────────────────────────────────────
+
+    def _on_dir_manager(self):
+        dlg = DirManagerDialog(self)
+        dlg.dirs_changed.connect(self._on_dirs_changed)
+        if dlg.exec() and dlg.should_scan_all():
+            cfg = load_config()
+            dirs = cfg.get("wallpaper_dirs", [])
+            if dirs:
+                self._start_scan(dirs)
+
+    def _on_dirs_changed(self):
+        self.status_bar.showMessage("📂 目录列表已更新", 2000)
+
+    # ─── 缩略图生成 ───────────────────────────────────────────
+
+    def _start_thumbnail_generation(self):
+        """启动后台缩略图生成"""
+        if self._thumb_worker and self._thumb_worker.isRunning():
+            return
+
+        wallpapers = db.query_wallpapers()
+        # 过滤掉已有缓存的
+        from core.thumbnail_worker import get_thumb_path
+        needs_gen = [
+            wp for wp in wallpapers
+            if wp.preview_path and Path(wp.preview_path).exists()
+            and not get_thumb_path(wp.preview_path).exists()
+        ]
+
+        if not needs_gen:
+            return
+
+        self._thumb_worker = ThumbnailWorker(needs_gen)
+        self._thumb_worker.progress.connect(self._on_thumb_progress)
+        self._thumb_worker.finished.connect(self._on_thumb_finished)
+        self._thumb_worker.start()
+
+    def _on_thumb_progress(self, current, total, title):
+        self.status_bar.showMessage(f"🖼️ 生成缩略图: {title} ({current}/{total})")
+
+    def _on_thumb_finished(self, count):
+        if count > 0:
+            self.status_bar.showMessage(f"✅ 缩略图生成完成，共 {count} 张", 3000)
+            self._load_data()  # 刷新显示缩略图
+        else:
+            self.status_bar.showMessage("缩略图已是最新", 2000)
+
+    # ─── 导入/导出 ────────────────────────────────────────────
+
+    def _on_export_all(self):
+        """导出全部收藏"""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出收藏列表",
+            str(Path.home() / "wallpaper_favorites.json"),
+            "JSON 文件 (*.json)",
+        )
+        if not path:
+            return
+
+        self._export_worker = ExportWorker(path, favorites_only=True)
+        self._export_worker.finished.connect(self._on_export_finished)
+        self.status_bar.showMessage("📤 正在导出...")
+        self._export_worker.start()
+
+    def _on_export_selected(self):
+        """导出选中的壁纸"""
+        if not self._selected_ids:
+            return
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出选中壁纸",
+            str(Path.home() / "wallpaper_selection.json"),
+            "JSON 文件 (*.json)",
+        )
+        if not path:
+            return
+
+        self._export_worker = ExportWorker(path, favorites_only=False,
+                                           wallpaper_ids=self._selected_ids)
+        self._export_worker.finished.connect(self._on_export_finished)
+        self.status_bar.showMessage("📤 正在导出选中项...")
+        self._export_worker.start()
+
+    def _on_export_finished(self, success, message):
+        self.status_bar.showMessage(message, 5000)
+
+    def _on_import(self):
+        """导入壁纸列表"""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入壁纸列表",
+            str(Path.home()),
+            "JSON 文件 (*.json)",
+        )
+        if not path:
+            return
+
+        self._import_worker = ImportWorker(path)
+        self._import_worker.progress.connect(self._on_import_progress)
+        self._import_worker.finished.connect(self._on_import_finished)
+
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setMaximum(0)
+        self.filter_bar.import_btn.setEnabled(False)
+        self.status_bar.showMessage("📥 正在导入...")
+        self._import_worker.start()
+
+    def _on_import_progress(self, current, total):
+        self.progress_bar.setMaximum(total)
+        self.progress_bar.setValue(current)
+
+    def _on_import_finished(self, stats):
+        self.progress_bar.setVisible(False)
+        self.filter_bar.import_btn.setEnabled(True)
+
+        if "error" in stats:
+            QMessageBox.critical(self, "导入失败", stats["error"])
+            self.status_bar.showMessage("导入失败")
+            return
+
+        msg = f"✅ 导入完成 — 新增: {stats['imported']}, 跳过: {stats['skipped']}, 错误: {stats['errors']}"
+        self.status_bar.showMessage(msg, 5000)
+        self._load_data()
+        self._start_thumbnail_generation()
+
+    # ─── 预览 ─────────────────────────────────────────────────
+
+    def _open_preview(self, wallpaper_id: int):
+        wp = next((w for w in self._current_wallpapers if w.id == wallpaper_id), None)
+        if wp:
+            dlg = PreviewDialog(wp, self)
+            dlg.exec()
+
+    # ─── 单卡交互 ─────────────────────────────────────────────
+
+    def _on_favorite_toggled(self, wallpaper_id: int):
+        new_state = db.toggle_favorite(wallpaper_id)
+        emoji = "❤️" if new_state else "🤍"
+        self.status_bar.showMessage(f"{emoji} 收藏{'已添加' if new_state else '已取消'}", 2000)
+        self._update_stats()
+
+    # ─── 窗口事件 ─────────────────────────────────────────────
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not hasattr(self, "_resize_timer"):
+            self._resize_timer = QTimer()
+            self._resize_timer.setSingleShot(True)
+            self._resize_timer.timeout.connect(self._load_data)
+        self._resize_timer.start(200)
+
+    def closeEvent(self, event):
+        """关闭时清理后台线程"""
+        if self._thumb_worker and self._thumb_worker.isRunning():
+            self._thumb_worker.cancel()
+            self._thumb_worker.wait(2000)
+        if self._scan_worker and self._scan_worker.isRunning():
+            self._scan_worker.wait(2000)
+        super().closeEvent(event)
