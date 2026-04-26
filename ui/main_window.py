@@ -36,7 +36,7 @@ CARD_SPACING = 8
 # ─── 后台工作线程 ───────────────────────────────────────────────
 
 class ScanWorker(QThread):
-    """后台扫描线程（支持多目录）"""
+    """后台扫描线程（多目录并行）"""
     progress = Signal(int, int, str)
     finished = Signal(dict)
 
@@ -45,13 +45,39 @@ class ScanWorker(QThread):
         self.directories = directories
 
     def run(self):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         try:
-            combined = {"added": 0, "updated": 0, "removed": 0, "errors": 0}
-            for i, directory in enumerate(self.directories):
-                self.progress.emit(i + 1, len(self.directories), Path(directory).name)
-                stats = scan_directory(directory)
-                for k in combined:
+            combined = {"added": 0, "updated": 0, "removed": 0, "errors": 0, "error_details": []}
+
+            if len(self.directories) == 1:
+                # 单目录：直接扫描
+                self.progress.emit(1, 1, Path(self.directories[0]).name)
+                stats = scan_directory(self.directories[0])
+                for k in ("added", "updated", "removed", "errors"):
                     combined[k] += stats.get(k, 0)
+                combined["error_details"].extend(stats.get("error_details", []))
+            else:
+                # 多目录：并行扫描
+                with ThreadPoolExecutor(max_workers=min(len(self.directories), 4)) as pool:
+                    future_to_dir = {
+                        pool.submit(scan_directory, d): d
+                        for d in self.directories
+                    }
+                    for i, future in enumerate(as_completed(future_to_dir)):
+                        d = future_to_dir[future]
+                        self.progress.emit(i + 1, len(self.directories), Path(d).name)
+                        try:
+                            stats = future.result()
+                            for k in ("added", "updated", "removed", "errors"):
+                                combined[k] += stats.get(k, 0)
+                            combined["error_details"].extend(stats.get("error_details", []))
+                        except Exception as e:
+                            combined["errors"] += 1
+                            combined["error_details"].append({
+                                "folder": Path(d).name,
+                                "reason": str(e),
+                            })
+
             self.finished.emit(combined)
         except Exception as e:
             self.finished.emit({"error": str(e)})
@@ -500,6 +526,21 @@ class MainWindow(QMainWindow):
             msg += f", 清理缓存: {cleaned}"
 
         self.status_bar.showMessage(msg)
+
+        # 显示扫描错误详情（最多 5 条）
+        error_details = stats.get("error_details", [])
+        if error_details:
+            detail_lines = [f"• {e['folder']}: {e['reason']}" for e in error_details[:5]]
+            if len(error_details) > 5:
+                detail_lines.append(f"... 还有 {len(error_details) - 5} 个错误")
+            QMessageBox.warning(
+                self,
+                f"扫描完成（{stats['errors']} 个错误）",
+                "以下文件解析失败（非壁纸文件或格式异常）：\n\n"
+                + "\n".join(detail_lines)
+                + "\n\n这些文件已被跳过，不影响其他壁纸。",
+            )
+
         self._load_data()
         self._start_thumbnail_generation()
 

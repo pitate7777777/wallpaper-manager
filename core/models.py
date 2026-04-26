@@ -17,6 +17,7 @@ class Wallpaper:
     description: str = ""
     is_favorite: bool = False
     scheme_color: str = ""       # 主题色，如 "0.51373 0.54510 0.70588"
+    extra_data: str = ""         # 未解析的原始字段（JSON 序列化），防止信息丢失
 
     @property
     def preview_path(self) -> str:

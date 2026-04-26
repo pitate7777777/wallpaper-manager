@@ -142,6 +142,7 @@ class TestWallpaperDefaults:
         assert wp.description == ""
         assert wp.is_favorite is False
         assert wp.scheme_color == ""
+        assert wp.extra_data == ""
 
     def test_partial_init(self):
         wp = Wallpaper(title="My Wallpaper", wp_type="video", is_favorite=True)

@@ -396,3 +396,98 @@ class TestContentRating:
         upsert_wallpaper(Wallpaper(folder_path="/cra3", content_rating=""))
         results = query_wallpapers(content_rating="")
         assert len(results) == 3
+
+
+class TestExtraData:
+    """extra_data 字段测试"""
+
+    def test_extra_data_roundtrip(self):
+        """写入 extra_data 再读出"""
+        from core.db import upsert_wallpaper, query_wallpapers
+        wp = Wallpaper(
+            folder_path="/tmp/extra_test",
+            extra_data='{"version": 2, "custom": "value"}',
+        )
+        upsert_wallpaper(wp)
+        results = query_wallpapers()
+        assert len(results) == 1
+        assert results[0].extra_data == '{"version": 2, "custom": "value"}'
+
+    def test_extra_data_default_empty(self):
+        """extra_data 默认为空"""
+        from core.db import upsert_wallpaper, query_wallpapers
+        wp = Wallpaper(folder_path="/tmp/no_extra")
+        upsert_wallpaper(wp)
+        results = query_wallpapers()
+        assert results[0].extra_data == ""
+
+    def test_extra_data_update(self):
+        """extra_data 可更新"""
+        from core.db import upsert_wallpaper, query_wallpapers
+        wp = Wallpaper(folder_path="/tmp/update_extra", extra_data='{"old": true}')
+        upsert_wallpaper(wp)
+        wp.extra_data = '{"new": true}'
+        upsert_wallpaper(wp)
+        results = query_wallpapers()
+        assert results[0].extra_data == '{"new": true}'
+
+
+class TestSchemaMigration:
+    """Schema 迁移测试"""
+
+    def test_schema_version_set(self):
+        """init_db 后 schema_version 应为当前版本"""
+        from core.db import get_connection, SCHEMA_VERSION
+        with get_connection() as conn:
+            row = conn.execute("SELECT version FROM schema_version").fetchone()
+            assert row is not None
+            assert row["version"] == SCHEMA_VERSION
+
+    def test_extra_data_column_exists(self):
+        """wallpapers 表应有 extra_data 列"""
+        from core.db import get_connection
+        with get_connection() as conn:
+            cursor = conn.execute("PRAGMA table_info(wallpapers)")
+            columns = {row["name"] for row in cursor.fetchall()}
+            assert "extra_data" in columns
+
+
+class TestBackup:
+    """数据库备份测试"""
+
+    def test_backup_creates_file(self, tmp_path):
+        """备份应创建文件"""
+        from core.db import backup_database, DB_PATH
+        # 写入一些数据确保 DB 存在
+        from core.db import upsert_wallpaper
+        upsert_wallpaper(Wallpaper(folder_path="/backup_test"))
+
+        result = backup_database()
+        assert result is not None
+        assert result.exists()
+        assert result.suffix == ".db"
+
+    def test_backup_cleans_old(self, tmp_path):
+        """备份应清理旧备份，保留最近 3 份"""
+        from core.db import backup_database, DB_PATH, DB_DIR
+        from core.db import upsert_wallpaper
+        upsert_wallpaper(Wallpaper(folder_path="/backup_clean_test"))
+
+        # 创建 5 个备份
+        paths = []
+        for _ in range(5):
+            p = backup_database(max_backups=3)
+            if p:
+                paths.append(p)
+
+        backup_dir = DB_DIR / "backups"
+        if backup_dir.exists():
+            backups = list(backup_dir.glob("wallpapers_*.db"))
+            assert len(backups) <= 3
+
+    def test_backup_returns_none_if_no_db(self, tmp_path, monkeypatch):
+        """数据库不存在时备份返回 None"""
+        monkeypatch.setattr("core.db.DB_PATH", tmp_path / "nonexistent.db")
+        from core.db import backup_database
+        result = backup_database()
+        assert result is None

@@ -454,7 +454,7 @@ register_theme("ocean", { ... })
 python -m pytest tests/ -v
 ```
 
-当前 187 个测试用例（rotation_worker 12 个需 PySide6 显示环境）：
+当前 205 个测试用例（rotation_worker 12 个需 PySide6 显示环境）：
 
 | 文件 | 用例数 | 覆盖范围 |
 |------|--------|----------|
@@ -493,9 +493,9 @@ pip install PySide6-Multimedia
 
 ## 已知限制
 
-1. **WE WebSocket 控制不可用** — Wallpaper Engine 没有公开 API，PoC 仅供参考（已移至 `deprecated/`）
+1. **WE WebSocket 控制不可用** — Wallpaper Engine 没有公开 API，相关代码已清理
 2. **仅支持 Windows** — 壁纸设置功能依赖 Windows API 和 WE 官方 CLI
-3. **多目录仍为顺序扫描** — 每个目录内已并行解析，但多个目录之间仍串行
+3. **无自动更新机制** — 已集成 GitHub Release 版本检查，但需用户手动下载
 4. **无自动更新机制** — 用户需手动下载新版本
 
 ## Code Review 记录
@@ -576,7 +576,7 @@ pip install PySide6-Multimedia
 - `core/we_controller.py` → `deprecated/we_controller.py`（WE 无公开 WebSocket API）
 - 移除 `websockets` 依赖
 - `tests/test_wallpaper_setter.py` 重写（15→31 用例），`tests/test_db.py` 新增 5 个内容分级测试
-- 全部 187 个测试通过
+- 全部 205 个测试通过
 
 ### v0.4.1 (2026-04-26)
 

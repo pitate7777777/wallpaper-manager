@@ -1,5 +1,6 @@
 """SQLite 数据库层"""
 import json
+import logging
 import re
 import sqlite3
 from contextlib import contextmanager
@@ -7,6 +8,8 @@ from pathlib import Path
 from typing import Optional
 
 from .models import Wallpaper
+
+logger = logging.getLogger(__name__)
 
 DB_DIR = Path.home() / ".wallpaper-manager"
 DB_PATH = DB_DIR / "wallpapers.db"
@@ -23,7 +26,7 @@ DB_PATH = DB_DIR / "wallpapers.db"
 #
 # 注意: 迁移函数按版本号升序依次执行，每个函数只负责从 v(N-1) → vN 的变更。
 
-SCHEMA_VERSION: int = 1
+SCHEMA_VERSION: int = 2
 
 
 def _migrate_v1(conn: sqlite3.Connection) -> None:
@@ -35,10 +38,20 @@ def _migrate_v1(conn: sqlite3.Connection) -> None:
     pass
 
 
+def _migrate_v2(conn: sqlite3.Connection) -> None:
+    """v2: 新增 extra_data 列（存储 project.json 中未解析的字段）。"""
+    # 幂等：先检查列是否已存在（CREATE TABLE IF NOT EXISTS 可能已包含该列）
+    cursor = conn.execute("PRAGMA table_info(wallpapers)")
+    columns = {row["name"] for row in cursor.fetchall()}
+    if "extra_data" not in columns:
+        conn.execute("ALTER TABLE wallpapers ADD COLUMN extra_data TEXT DEFAULT ''")
+
+
 # 迁移注册表: 版本号 → 迁移函数
 # 新增迁移时在此追加，例如: 3: _migrate_v3
 _MIGRATIONS: dict[int, callable] = {
     1: _migrate_v1,
+    2: _migrate_v2,
 }
 
 
@@ -100,7 +113,7 @@ def init_db():
     """创建表结构并执行 schema 迁移。
 
     全新安装: 创建所有表 → 设 schema_version = SCHEMA_VERSION
-    已有数据库: 仅执行版本差距所需的迁移
+    已有数据库: 仅执行版本差距所需的迁移（迁移前自动备份）
     """
     with get_connection() as conn:
         # 1. 确保 schema_version 表存在
@@ -124,6 +137,7 @@ def init_db():
                 content_rating  TEXT DEFAULT '',
                 description     TEXT DEFAULT '',
                 scheme_color    TEXT DEFAULT '',
+                extra_data      TEXT DEFAULT '',
                 is_favorite     INTEGER DEFAULT 0,
                 created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -134,9 +148,49 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_favorite ON wallpapers(is_favorite);
         """)
 
-        # 3. 执行迁移（全新安装时 current=0，会跑全部迁移并设版本号）
+        # 3. 迁移前自动备份（仅在需要迁移时）
+        current = _get_current_version(conn)
+        if current > 0 and current < SCHEMA_VERSION:
+            backup_database()
+
+        # 4. 执行迁移（全新安装时 current=0，会跑全部迁移并设版本号）
         _run_migrations(conn)
         conn.commit()
+
+
+def backup_database(max_backups: int = 3) -> Optional[Path]:
+    """备份数据库文件，保留最近 max_backups 份。
+
+    Returns:
+        备份文件路径，失败返回 None
+    """
+    import shutil
+
+    if not DB_PATH.exists():
+        return None
+
+    backup_dir = DB_DIR / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = backup_dir / f"wallpapers_{timestamp}.db"
+
+    try:
+        shutil.copy2(str(DB_PATH), str(backup_path))
+        logger.info(f"数据库已备份: {backup_path}")
+
+        # 清理旧备份，保留最近 max_backups 份
+        backups = sorted(backup_dir.glob("wallpapers_*.db"), key=lambda p: p.stat().st_mtime)
+        while len(backups) > max_backups:
+            oldest = backups.pop(0)
+            oldest.unlink()
+            logger.info(f"清理旧备份: {oldest}")
+
+        return backup_path
+    except Exception as e:
+        logger.error(f"数据库备份失败: {e}")
+        return None
 
 
 def _row_to_wallpaper(row: sqlite3.Row) -> Wallpaper:
@@ -153,6 +207,7 @@ def _row_to_wallpaper(row: sqlite3.Row) -> Wallpaper:
         content_rating=row["content_rating"],
         description=row["description"],
         scheme_color=row["scheme_color"],
+        extra_data=row["extra_data"] if "extra_data" in row.keys() else "",
         is_favorite=bool(row["is_favorite"]),
     )
 
@@ -163,8 +218,8 @@ def upsert_wallpaper(wp: Wallpaper) -> int:
         cursor = conn.execute("""
             INSERT INTO wallpapers (folder_path, workshop_id, title, wp_type, file,
                                     preview, tags, content_rating, description,
-                                    scheme_color, is_favorite)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    scheme_color, extra_data, is_favorite)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(folder_path) DO UPDATE SET
                 workshop_id=excluded.workshop_id,
                 title=excluded.title,
@@ -174,12 +229,13 @@ def upsert_wallpaper(wp: Wallpaper) -> int:
                 tags=excluded.tags,
                 content_rating=excluded.content_rating,
                 description=excluded.description,
-                scheme_color=excluded.scheme_color
+                scheme_color=excluded.scheme_color,
+                extra_data=excluded.extra_data
         """, (
             wp.folder_path, wp.workshop_id, wp.title, wp.wp_type,
             wp.file, wp.preview, json.dumps(wp.tags, ensure_ascii=False),
             wp.content_rating, wp.description, wp.scheme_color,
-            int(wp.is_favorite),
+            wp.extra_data, int(wp.is_favorite),
         ))
         wp_id = cursor.lastrowid
         conn.commit()

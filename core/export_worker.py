@@ -58,6 +58,7 @@ class ExportWorker(QThread):
                         "content_rating": wp.content_rating,
                         "description": wp.description,
                         "scheme_color": wp.scheme_color,
+                        "extra_data": wp.extra_data,
                         "is_favorite": wp.is_favorite,
                     }
                     for wp in wallpapers
@@ -117,6 +118,7 @@ class ImportWorker(QThread):
                         content_rating=item.get("content_rating", ""),
                         description=item.get("description", ""),
                         scheme_color=item.get("scheme_color", ""),
+                        extra_data=item.get("extra_data", ""),
                         is_favorite=item.get("is_favorite", False),
                     )
                     db.upsert_wallpaper(wp)

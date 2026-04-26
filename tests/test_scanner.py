@@ -211,3 +211,102 @@ class TestParseProjectJson:
         wp = parse_project_json(wp_dir)
         assert wp is not None
         assert wp.scheme_color == "0.9 0.1 0.1"
+
+
+class TestTagsValidation:
+    """tags 字段类型校验测试"""
+
+    def test_tags_as_string_list(self, tmp_path):
+        """tags 正常为字符串列表"""
+        data = {"title": "OK", "tags": ["a", "b"]}
+        wp_dir = _make_wallpaper_dir(tmp_path, "wp1", data)
+        wp = parse_project_json(wp_dir)
+        assert wp.tags == ["a", "b"]
+
+    def test_tags_with_integers(self, tmp_path):
+        """tags 混入整数（某些壁纸的异常格式）"""
+        data = {"title": "Int Tags", "tags": ["good", 42, 3.14]}
+        wp_dir = _make_wallpaper_dir(tmp_path, "wp2", data)
+        wp = parse_project_json(wp_dir)
+        assert wp.tags == ["good", "42", "3.14"]
+
+    def test_tags_is_string(self, tmp_path):
+        """tags 为字符串而非列表（异常格式）"""
+        data = {"title": "Bad Tags", "tags": "not-a-list"}
+        wp_dir = _make_wallpaper_dir(tmp_path, "wp3", data)
+        wp = parse_project_json(wp_dir)
+        assert wp.tags == []
+
+    def test_tags_is_none(self, tmp_path):
+        """tags 为 None"""
+        data = {"title": "Null Tags", "tags": None}
+        wp_dir = _make_wallpaper_dir(tmp_path, "wp4", data)
+        wp = parse_project_json(wp_dir)
+        assert wp.tags == []
+
+    def test_tags_with_none_elements(self, tmp_path):
+        """tags 列表中混入 None 元素"""
+        data = {"title": "Mixed", "tags": ["good", None, "ok"]}
+        wp_dir = _make_wallpaper_dir(tmp_path, "wp5", data)
+        wp = parse_project_json(wp_dir)
+        # None 不是 str/int/float，会被过滤
+        assert wp.tags == ["good", "ok"]
+
+
+class TestExtraData:
+    """extra_data 保留未解析字段测试"""
+
+    def test_extra_data_preserved(self, tmp_path):
+        """未知字段被保留到 extra_data"""
+        data = {
+            "title": "Has Extra",
+            "type": "scene",
+            "version": 2,
+            "custom_field": "hello",
+            "nested": {"key": "value"},
+        }
+        wp_dir = _make_wallpaper_dir(tmp_path, "wp_extra1", data)
+        wp = parse_project_json(wp_dir)
+        assert wp is not None
+        extra = json.loads(wp.extra_data)
+        assert extra["version"] == 2
+        assert extra["custom_field"] == "hello"
+        assert extra["nested"] == {"key": "value"}
+        # 已解析字段不应出现在 extra_data 中
+        assert "title" not in extra
+        assert "type" not in extra
+
+    def test_extra_data_empty_when_no_extras(self, tmp_path):
+        """只有已知字段时 extra_data 为空"""
+        data = {"title": "Minimal", "type": "video"}
+        wp_dir = _make_wallpaper_dir(tmp_path, "wp_extra2", data)
+        wp = parse_project_json(wp_dir)
+        assert wp.extra_data == ""
+
+    def test_version_field_preserved(self, tmp_path):
+        """version 字段被保留在 extra_data 中"""
+        data = {"title": "Versioned", "type": "scene", "version": 3}
+        wp_dir = _make_wallpaper_dir(tmp_path, "wp_ver", data)
+        wp = parse_project_json(wp_dir)
+        extra = json.loads(wp.extra_data)
+        assert extra["version"] == 3
+
+
+class TestEdgeCases:
+    """边界情况测试"""
+
+    def test_non_dict_json(self, tmp_path):
+        """project.json 顶层不是对象（如数组）"""
+        wp_dir = tmp_path / "wp_array"
+        wp_dir.mkdir()
+        (wp_dir / "project.json").write_text('[1, 2, 3]', encoding="utf-8")
+        result = parse_project_json(wp_dir)
+        assert result is None
+
+    def test_non_dict_json_string(self, tmp_path):
+        """project.json 顶层是字符串"""
+        wp_dir = tmp_path / "wp_string"
+        wp_dir.mkdir()
+        (wp_dir / "project.json").write_text('"just a string"', encoding="utf-8")
+        result = parse_project_json(wp_dir)
+        assert result is None

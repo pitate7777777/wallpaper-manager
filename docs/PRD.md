@@ -1,7 +1,7 @@
 # 需求文档 (PRD)
 
 > **项目名称**: Wallpaper Manager
-> **版本**: v0.4.2
+> **版本**: 见 [`pyproject.toml`](../pyproject.toml) `version` 字段（唯一事实源）
 > **日期**: 2026-04-26
 > **状态**: Phase 3 完成 + Code Review
 
@@ -377,11 +377,12 @@ wallpaper-manager/
 │   ├── models.py           # 数据模型
 │   ├── db.py               # 数据库操作 + Schema 迁移 + 高级搜索
 │   ├── scanner.py          # 目录扫描 + project.json 解析
-│   ├── thumbnail_worker.py # 缩略图缓存生成 + 清理
+│   ├── thumbnail_worker.py # 缩略图缓存生成 + LRU 清理
 │   ├── export_worker.py    # 导入/导出后台线程
 │   ├── wallpaper_setter.py # 壁纸设置（Windows API + WE CLI）
 │   ├── rotation_worker.py  # 壁纸定时轮换
-│   └── tag_manager.py      # 标签管理
+│   ├── tag_manager.py      # 标签管理
+│   └── version_check.py    # GitHub Release 版本检查
 ├── ui/                     # 界面层
 │   ├── theme.py            # 多主题系统（暗色/亮色）+ QSS 生成
 │   ├── main_window.py      # 主窗口（网格 + 过滤 + 扫描）
@@ -391,12 +392,9 @@ wallpaper-manager/
 │   ├── context_menu.py     # 右键上下文菜单
 │   ├── dir_manager_dialog.py # 多目录管理对话框
 │   └── tag_manager_dialog.py # 标签管理对话框
-├── deprecated/             # 已废弃模块（保留供参考）
-│   ├── we_controller.py    # WE WebSocket PoC（已确认无公开 API）
-│   └── test_we_controller.py
 ├── scripts/
 │   └── build.py            # 跨平台打包脚本
-├── tests/                  # 单元测试 (187 passed)
+├── tests/                  # 单元测试 (205 passed)
 │   ├── conftest.py
 │   ├── test_models.py
 │   ├── test_db.py
@@ -519,7 +517,7 @@ wallpaper-manager/
 - `core/we_controller.py` → `deprecated/we_controller.py`（WE 无公开 WebSocket API）
 - `tests/test_we_controller.py` → `deprecated/test_we_controller.py`
 
-**测试：** 187 passed（+5 内容分级, +16 WE CLI, -20 已废弃 we_controller）
+**测试：** 205 passed（+5 内容分级, +16 WE CLI, -20 已废弃 we_controller）
 
 ### v0.3.0 (2026-04-26) — Phase 3 高级功能
 
@@ -694,7 +692,7 @@ wallpaper-manager/
 - `core/we_controller.py` → `deprecated/we_controller.py`（WE 无公开 WebSocket API）
 - `tests/test_we_controller.py` → `deprecated/test_we_controller.py`
 
-**测试：** 187 passed（+5 内容分级, +16 WE CLI, -20 已废弃 we_controller）
+**测试：** 205 passed（+5 内容分级, +16 WE CLI, -20 已废弃 we_controller）
 
 ### v0.4.1 (2026-04-26) — Bug 修复 + 性能优化
 
