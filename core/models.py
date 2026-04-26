@@ -1,6 +1,23 @@
 """数据模型"""
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
+
+
+# 内容分级映射 (Wallpaper Engine project.json contentrating → 中文)
+RATING_LABELS = {
+    "Everyone": "所有人",
+    "Teen": "青少年",
+    "Mature": "成人",
+    "AdultOnly": "仅成人",
+}
+
+# 类型 emoji 映射（统一引用，避免三处重复定义）
+TYPE_EMOJI = {
+    "video": "🎬",
+    "scene": "🖼️",
+    "web": "🌐",
+}
 
 
 @dataclass
@@ -22,17 +39,15 @@ class Wallpaper:
     @property
     def preview_path(self) -> str:
         """预览图的绝对路径"""
-        import os
         if self.preview:
-            return os.path.join(self.folder_path, self.preview)
+            return str(Path(self.folder_path) / self.preview)
         return ""
 
     @property
     def wallpaper_file_path(self) -> str:
         """壁纸文件的绝对路径"""
-        import os
         if self.file:
-            return os.path.join(self.folder_path, self.file)
+            return str(Path(self.folder_path) / self.file)
         return ""
 
     @property

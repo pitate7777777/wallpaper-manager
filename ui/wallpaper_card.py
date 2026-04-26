@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPixmap, QFont
 
-from core.models import Wallpaper
+from core.models import Wallpaper, TYPE_EMOJI
 from core.thumbnail_worker import get_thumb_path
 from ui.theme import COLORS
 
@@ -127,7 +127,7 @@ class WallpaperCard(QFrame):
                 return
 
         # 占位图
-        type_emoji = {"video": "🎬", "scene": "🖼️", "web": "🌐"}.get(self.wallpaper.wp_type, "📄")
+        type_emoji = TYPE_EMOJI.get(self.wallpaper.wp_type, "📄")
         self.preview_label.setText(f"{type_emoji}\n{self.wallpaper.wp_type or '未知类型'}")
         self.preview_label.setStyleSheet(
             f"color: {COLORS['text_placeholder']}; font-size: 12px; background: {COLORS['bg_preview']};"

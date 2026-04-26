@@ -14,7 +14,7 @@ from PySide6.QtGui import QFont
 
 from core import db
 from core.scanner import scan_directory
-from core.models import Wallpaper
+from core.models import Wallpaper, TYPE_EMOJI
 from core.thumbnail_worker import ThumbnailWorker, cleanup_thumbs
 from core.export_worker import ExportWorker, ImportWorker
 from core.wallpaper_setter import WallpaperSetter
@@ -296,7 +296,7 @@ class MainWindow(QMainWindow):
         if stats['favorites']:
             parts.append(f"❤️ {stats['favorites']} 收藏")
         for t, c in stats['by_type'].items():
-            emoji = {"video": "🎬", "scene": "🖼️", "web": "🌐"}.get(t, "📄")
+            emoji = TYPE_EMOJI.get(t, "📄")
             parts.append(f"{emoji} {t}: {c}")
         self.stats_label.setText("  ·  ".join(parts))
 
@@ -458,11 +458,10 @@ class MainWindow(QMainWindow):
         targets = self._selected_ids if self._selected_ids else (
             {self._context_menu_wallpaper_id} if self._context_menu_wallpaper_id else set()
         )
-        count = 0
-        for wp_id in targets:
-            if wp_id:
-                db.set_favorite(wp_id, True)
-                count += 1
+        targets = [wp_id for wp_id in targets if wp_id]
+        if not targets:
+            return
+        count = db.batch_set_favorite(targets, True)
         self.status_bar.showMessage(f"❤️ 已收藏 {count} 项", 2000)
         self._clear_selection()
         self._load_data()
@@ -472,11 +471,10 @@ class MainWindow(QMainWindow):
         targets = self._selected_ids if self._selected_ids else (
             {self._context_menu_wallpaper_id} if self._context_menu_wallpaper_id else set()
         )
-        count = 0
-        for wp_id in targets:
-            if wp_id:
-                db.set_favorite(wp_id, False)
-                count += 1
+        targets = [wp_id for wp_id in targets if wp_id]
+        if not targets:
+            return
+        count = db.batch_set_favorite(targets, False)
         self.status_bar.showMessage(f"🤍 已取消收藏 {count} 项", 2000)
         self._clear_selection()
         self._load_data()

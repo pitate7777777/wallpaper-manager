@@ -66,7 +66,7 @@ class WallpaperSetter:
     # ── 静态图片壁纸 (Windows API) ───────────────────────────
 
     @staticmethod
-    def set_wallpaper(image_path: str, style: str = "stretch") -> bool:
+    def set_wallpaper(image_path: str, style: str = "fill") -> bool:
         """通过 Windows API 设置桌面壁纸
 
         Args:

@@ -16,7 +16,7 @@ try:
 except ImportError:
     HAS_MULTIMEDIA = False
 
-from core.models import Wallpaper
+from core.models import Wallpaper, RATING_LABELS
 from ui.theme import COLORS
 
 
@@ -118,7 +118,7 @@ class PreviewDialog(QDialog):
         left_info.addWidget(self.tags_label)
 
         self.rating_label = QLabel(
-            f"<b style='color:{_tc}'>分级:</b> <span style='color:{_ts}'>{self.wallpaper.content_rating or '未知'}</span>"
+            f"<b style='color:{_tc}'>分级:</b> <span style='color:{_ts}'>{self._rating_display(self.wallpaper.content_rating)}</span>"
         )
         self.rating_label.setTextFormat(Qt.RichText)
         left_info.addWidget(self.rating_label)
@@ -131,7 +131,7 @@ class PreviewDialog(QDialog):
         left_info.addWidget(self.file_label)
 
         self.workshop_label = QLabel(
-            f"<b style='color:{_tc}'>Workshop ID:</b> <span style='color:{_ts}'>{self.wallpaper.workshop_id}</span>"
+            f"<b style='color:{_tc}'>工坊 ID:</b> <span style='color:{_ts}'>{self.wallpaper.workshop_id}</span>"
         )
         self.workshop_label.setTextFormat(Qt.RichText)
         left_info.addWidget(self.workshop_label)
@@ -180,8 +180,8 @@ class PreviewDialog(QDialog):
         self.video_widget = QVideoWidget()
         self.video_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        self._player = QMediaPlayer()
-        self._audio_output = QAudioOutput()
+        self._player = QMediaPlayer(self)
+        self._audio_output = QAudioOutput(self)
         self._player.setAudioOutput(self._audio_output)
         self._player.setVideoOutput(self.video_widget)
 
@@ -275,6 +275,11 @@ class PreviewDialog(QDialog):
         m, s = divmod(s, 60)
         return f"{m}:{s:02d}"
 
+    @staticmethod
+    def _rating_display(rating: str) -> str:
+        """将 WE 原始分级值翻译为中文"""
+        return RATING_LABELS.get(rating, rating) if rating else "未知"
+
     def _on_fav_clicked(self):
         """切换收藏状态"""
         from core import db
@@ -295,13 +300,14 @@ class PreviewDialog(QDialog):
         super().resizeEvent(event)
         if self.stack.currentIndex() == 0:
             if not hasattr(self, "_resize_timer"):
-                self._resize_timer = QTimer()
+                self._resize_timer = QTimer(self)
                 self._resize_timer.setSingleShot(True)
                 self._resize_timer.timeout.connect(self._load_preview_image)
             self._resize_timer.start(100)
 
     def closeEvent(self, event):
-        """关闭时停止视频播放"""
+        """关闭时停止视频播放并释放资源"""
         if self._player:
             self._player.stop()
+            self._player.setVideoOutput(None)
         super().closeEvent(event)

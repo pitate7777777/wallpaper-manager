@@ -9,6 +9,7 @@ from PySide6.QtGui import QAction
 from PySide6.QtCore import Signal, QEvent, Qt
 
 from ui.theme import COLORS
+from core.models import RATING_LABELS as _RATING_LABELS
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -462,6 +463,10 @@ class FilterBar(QWidget):
         """更新标签列表（供多选弹出面板使用）"""
         self._all_tags = tags
 
+    # 内容分级映射 (WE 原始值 → 中文显示)
+    # 使用 models 中的 RATING_LABELS，方法内直接引用 _RATING_LABELS
+    RATING_LABELS = _RATING_LABELS
+
     def update_ratings(self, ratings: list[str]):
         """更新内容分级下拉框"""
         current = self.rating_combo.currentData()
@@ -469,7 +474,8 @@ class FilterBar(QWidget):
         self.rating_combo.clear()
         self.rating_combo.addItem("全部分级", "")
         for r in ratings:
-            self.rating_combo.addItem(r, r)
+            label = self.RATING_LABELS.get(r, r)
+            self.rating_combo.addItem(label, r)
         # 恢复之前的选择
         if current:
             idx = self.rating_combo.findData(current)

@@ -121,3 +121,7 @@ def _handle_version_result(info: dict, window):
         )
         if reply == QMessageBox.Open:
             QDesktopServices.openUrl(QUrl(url))
+
+
+if __name__ == "__main__":
+    main()

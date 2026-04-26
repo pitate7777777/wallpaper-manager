@@ -271,6 +271,33 @@ def set_favorite(wallpaper_id: int, favorite: bool):
         conn.commit()
 
 
+def batch_set_favorite(wallpaper_ids: list[int], favorite: bool) -> int:
+    """批量设置收藏状态（单次 SQL，避免 N+1）
+
+    Args:
+        wallpaper_ids: 壁纸 ID 列表
+        favorite: 目标收藏状态
+
+    Returns:
+        受影响的行数
+    """
+    if not wallpaper_ids:
+        return 0
+    placeholders = ",".join(["?"] * len(wallpaper_ids))
+    with get_connection() as conn:
+        cursor = conn.execute(
+            f"UPDATE wallpapers SET is_favorite = ? WHERE id IN ({placeholders})",
+            [int(favorite)] + wallpaper_ids,
+        )
+        conn.commit()
+        return cursor.rowcount
+
+
+def _escape_like(pattern: str) -> str:
+    """转义 LIKE 模式中的通配符 % 和 _"""
+    return re.sub(r'([%_])', r'\\\1', pattern)
+
+
 def query_wallpapers(
     search: str = "",
     wp_type: str = "",
@@ -312,8 +339,9 @@ def query_wallpapers(
             if search_mode == "exact":
                 # 精确匹配：title 完全相等；tags 匹配 JSON 数组中的精确元素
                 # 用 %"<term>"% 确保匹配 JSON 字符串中的完整词，不会误匹配子串
+                escaped = _escape_like(search)
                 conditions.append('(title = ? OR tags LIKE ?)')
-                params.extend([search, f'%"{search}"%'])
+                params.extend([search, f'%"{escaped}%'])
             elif search_mode == "regex":
                 # 正则搜索：通过 SQLite REGEXP 函数在数据库侧过滤
                 # 避免将全部记录加载到 Python 内存中
@@ -326,8 +354,9 @@ def query_wallpapers(
                 params.extend([search, search])
             else:
                 # simple (默认，LIKE 匹配)
+                escaped = _escape_like(search)
                 conditions.append("(title LIKE ? OR tags LIKE ?)")
-                params.extend([f"%{search}%", f"%{search}%"])
+                params.extend([f"%{escaped}%", f"%{escaped}%"])
 
         if wp_type:
             conditions.append("wp_type = ?")
@@ -440,14 +469,11 @@ def rename_tag(old_name: str, new_name: str) -> int:
             tags = json.loads(row["tags"])
             if old_name in tags:
                 tags = [new_name if t == old_name else t for t in tags]
-                # 去重
-                seen = []
-                for t in tags:
-                    if t not in seen:
-                        seen.append(t)
+                # 去重（保持顺序）
+                tags = list(dict.fromkeys(tags))
                 conn.execute(
                     "UPDATE wallpapers SET tags = ? WHERE id = ?",
-                    (json.dumps(seen, ensure_ascii=False), row["id"]),
+                    (json.dumps(tags, ensure_ascii=False), row["id"]),
                 )
                 count += 1
         conn.commit()
@@ -502,13 +528,10 @@ def merge_tags(source_names: list[str], target_name: str) -> int:
                 if not merged and not target_already:
                     new_tags.append(target_name)
                 # 去重：保留顺序
-                seen = []
-                for t in new_tags:
-                    if t not in seen:
-                        seen.append(t)
+                new_tags = list(dict.fromkeys(new_tags))
                 conn.execute(
                     "UPDATE wallpapers SET tags = ? WHERE id = ?",
-                    (json.dumps(seen, ensure_ascii=False), row["id"]),
+                    (json.dumps(new_tags, ensure_ascii=False), row["id"]),
                 )
                 count += 1
         conn.commit()

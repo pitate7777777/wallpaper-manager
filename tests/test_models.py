@@ -1,5 +1,7 @@
 """core.models 单元测试"""
 import os
+from pathlib import Path
+
 import pytest
 
 from core.models import Wallpaper
@@ -10,7 +12,7 @@ class TestPreviewPath:
 
     def test_with_preview(self):
         wp = Wallpaper(folder_path="/home/user/wallpapers/wp1", preview="preview.jpg")
-        assert wp.preview_path == os.path.join("/home/user/wallpapers/wp1", "preview.jpg")
+        assert wp.preview_path == str(Path("/home/user/wallpapers/wp1") / "preview.jpg")
 
     def test_empty_preview(self):
         wp = Wallpaper(folder_path="/home/user/wallpapers/wp1", preview="")
@@ -18,7 +20,7 @@ class TestPreviewPath:
 
     def test_nested_preview(self):
         wp = Wallpaper(folder_path="/data/wps", preview="subdir/preview.png")
-        assert wp.preview_path == os.path.join("/data/wps", "subdir/preview.png")
+        assert wp.preview_path == str(Path("/data/wps") / "subdir/preview.png")
 
     def test_default_preview(self):
         wp = Wallpaper()
@@ -30,7 +32,7 @@ class TestWallpaperFilePath:
 
     def test_with_file(self):
         wp = Wallpaper(folder_path="/home/user/wallpapers/wp1", file="video.mp4")
-        assert wp.wallpaper_file_path == os.path.join("/home/user/wallpapers/wp1", "video.mp4")
+        assert wp.wallpaper_file_path == str(Path("/home/user/wallpapers/wp1") / "video.mp4")
 
     def test_empty_file(self):
         wp = Wallpaper(folder_path="/home/user/wallpapers/wp1", file="")
@@ -42,7 +44,7 @@ class TestWallpaperFilePath:
 
     def test_scene_file(self):
         wp = Wallpaper(folder_path="/data/wps", file="index.html")
-        assert wp.wallpaper_file_path == os.path.join("/data/wps", "index.html")
+        assert wp.wallpaper_file_path == str(Path("/data/wps") / "index.html")
 
 
 class TestTagsDisplay:
