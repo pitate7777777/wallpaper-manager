@@ -111,6 +111,8 @@ class RotationWorker(QObject):
         """停止轮换"""
         if self._timer:
             self._timer.stop()
+            # 置 None，确保 start_rotation 重入时能正确重建 QTimer
+            self._timer = None
         self._running = False
         logger.info("壁纸轮换已停止")
         self.rotation_stopped.emit()

@@ -12,7 +12,7 @@ from PySide6.QtCore import QThread, Signal
 
 logger = logging.getLogger(__name__)
 
-GITHUB_REPO = "piteate7777777/wallpaper-manager"
+GITHUB_REPO = "pitate7777777/wallpaper-manager"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
 

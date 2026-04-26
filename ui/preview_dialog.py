@@ -30,6 +30,7 @@ class PreviewDialog(QDialog):
         self.wallpaper = wallpaper
         self._player = None
         self._audio_output = None
+        self._original_pixmap: QPixmap | None = None  # 缓存原始 QPixmap，resize 时直接缩放
         self.setWindowTitle(f"📋 {wallpaper.title}")
         self.setMinimumSize(600, 400)
         self.resize(900, 700)
@@ -211,17 +212,27 @@ class PreviewDialog(QDialog):
             self._load_preview_image()
 
     def _load_preview_image(self):
-        """加载预览图"""
-        preview_path = self.wallpaper.preview_path
-        if preview_path and Path(preview_path).exists():
-            pixmap = QPixmap(preview_path)
-            if not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    self.scroll_area.size() - QSize(20, 20),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation,
-                )
-                self.image_label.setPixmap(scaled)
-                return
+        """加载预览图（首次从磁盘解码并缓存，resize 时复用缓存直接缩放）"""
+        # 首次加载：从磁盘解码并缓存原始 QPixmap
+        if self._original_pixmap is None:
+            preview_path = self.wallpaper.preview_path
+            if preview_path and Path(preview_path).exists():
+                pixmap = QPixmap(preview_path)
+                if not pixmap.isNull():
+                    self._original_pixmap = pixmap
+                else:
+                    self._original_pixmap = None
+            else:
+                self._original_pixmap = None
+
+        # 用缓存缩放显示（resize 时不重新读磁盘）
+        if self._original_pixmap is not None:
+            scaled = self._original_pixmap.scaled(
+                self.scroll_area.size() - QSize(20, 20),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            )
+            self.image_label.setPixmap(scaled)
+            return
 
         self.image_label.setText("无法加载预览图")
         self.image_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 16px;")

@@ -1,6 +1,9 @@
 """配置管理"""
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path.home() / ".wallpaper-manager"
 CONFIG_PATH = CONFIG_DIR / "config.json"
@@ -23,8 +26,12 @@ def load_config() -> dict:
                 cfg = json.load(f)
                 merged = {**DEFAULT_CONFIG, **cfg}
                 return merged
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "配置文件读取失败，已回退到默认配置：%s（路径：%s）",
+                e,
+                CONFIG_PATH,
+            )
     return dict(DEFAULT_CONFIG)
 
 

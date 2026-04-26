@@ -4,6 +4,7 @@
 """
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
@@ -13,8 +14,8 @@ from .models import Wallpaper
 
 logger = logging.getLogger(__name__)
 
-# 并行解析线程数（I/O 密集，可适当提高）
-_PARSE_WORKERS = 8
+# 并行解析线程数（I/O 密集，取 CPU 核数×2，但不超过 8）
+_PARSE_WORKERS = min(8, (os.cpu_count() or 1) * 2)
 
 # project.json 中已知并解析的字段（其余归入 extra_data）
 _PARSED_KEYS = frozenset({

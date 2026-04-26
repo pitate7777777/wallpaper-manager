@@ -10,6 +10,9 @@ from PIL import Image
 logger = logging.getLogger(__name__)
 
 THUMB_DIR = Path.home() / ".wallpaper-manager" / "thumbs"
+# 缩略图统一尺寸（16:9）
+# 注意：config.py DEFAULT_CONFIG["thumb_size"] 也维护了相同的默认值 [320, 180]，
+# 如需修改请同步两处（当前版本生成逻辑不读取 config，以此常量为准）。
 THUMB_SIZE = (320, 180)  # 16:9 统一尺寸
 
 # 缓存上限（默认 500MB），超出时按最久未访问淘汰

@@ -455,7 +455,9 @@ class MainWindow(QMainWindow):
 
     def _batch_favorite(self):
         """批量收藏（强制设为收藏状态）"""
-        targets = self._selected_ids if self._selected_ids else {self._context_menu_wallpaper_id}
+        targets = self._selected_ids if self._selected_ids else (
+            {self._context_menu_wallpaper_id} if self._context_menu_wallpaper_id else set()
+        )
         count = 0
         for wp_id in targets:
             if wp_id:
@@ -467,7 +469,9 @@ class MainWindow(QMainWindow):
 
     def _batch_unfavorite(self):
         """批量取消收藏（强制取消收藏状态）"""
-        targets = self._selected_ids if self._selected_ids else {self._context_menu_wallpaper_id}
+        targets = self._selected_ids if self._selected_ids else (
+            {self._context_menu_wallpaper_id} if self._context_menu_wallpaper_id else set()
+        )
         count = 0
         for wp_id in targets:
             if wp_id:
@@ -588,7 +592,9 @@ class MainWindow(QMainWindow):
     def _on_thumb_finished(self, count):
         if count > 0:
             self.status_bar.showMessage(f"✅ 缩略图生成完成，共 {count} 张", 3000)
-            self._load_data()  # 刷新显示缩略图
+            # 复用现有壁纸数据重建卡片（缩略图已落盘，WallpaperCard 会自动加载缓存）
+            # 不重新查询数据库，避免不必要的 IO
+            self._populate_grid(self._current_wallpapers)
         else:
             self.status_bar.showMessage("缩略图已是最新", 2000)
 
@@ -746,8 +752,8 @@ class MainWindow(QMainWindow):
         cfg = load_config()
         cfg["card_size"] = size
         save_config(cfg)
-        # 重新布局
-        self._load_data()
+        # 复用已有数据重建网格（避免重新查询数据库）
+        self._populate_grid(self._current_wallpapers)
         self.status_bar.showMessage(f"📐 卡片尺寸: {size}", 2000)
 
     # ─── 壁纸设置 ─────────────────────────────────────────────
@@ -826,12 +832,15 @@ class MainWindow(QMainWindow):
             self._stop_rotation()
 
     def _start_rotation(self, interval_minutes: int, mode: str):
-        """启动壁纸轮换"""
+        """启动壁纸轮换
+
+        db_query_func 始终查全部壁纸；"收藏模式"过滤在 RotationWorker
+        内部的 _refresh_wallpaper_list 中执行，避免与 db_query_func 双重叠加
+        导致 random/sequential 模式也只轮换收藏壁纸。
+        """
         if self._rotation_worker is None:
             self._rotation_worker = RotationWorker(
-                db_query_func=lambda: db.query_wallpapers(
-                    favorites_only=(mode == "favorite")
-                ),
+                db_query_func=lambda: db.query_wallpapers(),
                 set_wallpaper_func=self._apply_rotation_wallpaper,
                 interval_minutes=interval_minutes,
                 mode=mode,

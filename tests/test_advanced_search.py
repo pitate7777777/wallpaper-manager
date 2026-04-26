@@ -88,17 +88,22 @@ class TestSearchMode:
         assert results[0].title == "Sunset Beach"
 
     def test_exact_search_no_partial(self, sample_wallpapers):
-        """精确搜索 - 部分匹配不命中"""
+        """精确搜索 - 部分匹配不命中标题；但会匹配 tags 中的精确元素"""
         from core.db import query_wallpapers
-        results = query_wallpapers(search="Sunset", search_mode="exact")
+        # "Sune" 不是任何标题的精确值，也不是任何标签的精确元素
+        results = query_wallpapers(search="Sune", search_mode="exact")
         assert len(results) == 0
 
     def test_exact_search_tags(self, sample_wallpapers):
-        """精确搜索 - 匹配标签字段"""
+        """精确搜索 - 匹配标签字段中的精确元素（JSON LIKE %\"term\"%）"""
         from core.db import query_wallpapers
-        # 精确搜索匹配 tags 字段（整个 JSON 字符串）
-        results = query_wallpapers(search='["nature", "beach", "sunset"]', search_mode="exact")
-        assert len(results) == 1
+        # "nature" 是 wp1 和 wp2 标签中的精确元素
+        results = query_wallpapers(search="nature", search_mode="exact")
+        # title 中没有精确等于 "nature" 的，但 tags JSON 含 "nature" 元素
+        assert len(results) == 2
+        titles = [r.title for r in results]
+        assert "Sunset Beach" in titles
+        assert "Mountain Lake" in titles
 
     def test_regex_search_basic(self, sample_wallpapers):
         """正则搜索 - 基本匹配"""

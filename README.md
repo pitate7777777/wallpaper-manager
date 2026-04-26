@@ -103,7 +103,6 @@ wallpaper-manager/
 │   ├── test_wallpaper_setter.py
 │   ├── test_rotation_worker.py
 │   ├── test_tag_manager.py
-│   └── version_check.py    # GitHub Release 版本检查
 │   └── test_advanced_search.py
 ├── docs/
 │   ├── PRD.md              # 需求文档

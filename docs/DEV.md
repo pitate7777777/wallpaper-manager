@@ -115,7 +115,7 @@ CREATE TABLE schema_version (
 
 `db.py` 内置了轻量级 schema 迁移框架：
 
-- `SCHEMA_VERSION` 常量标记当前 schema 版本（目前为 1）
+- `SCHEMA_VERSION` 常量标记当前 schema 版本（目前为 2）
 - `schema_version` 表记录数据库当前版本
 - `_run_migrations()` 在 `init_db()` 中自动检测版本差距并执行迁移
 - 新增迁移：编写 `_migrate_vN(conn)` 函数，注册到 `_MIGRATIONS` 字典
@@ -144,13 +144,20 @@ def scan_directory(root_dir: str, progress_callback=None) -> dict
 | 函数 | 说明 |
 |------|------|
 | `init_db()` | 创建表结构 + 执行 schema 迁移（幂等） |
-| `upsert_wallpaper(wp)` | 插入或更新（按 folder_path 冲突更新） |
-| `toggle_favorite(id)` | 切换收藏状态 |
+| `upsert_wallpaper(wp)` | 插入或更新（按 folder_path 冲突更新；有意不覆盖 is_favorite） |
+| `toggle_favorite(id)` | 切换收藏状态，返回新状态 |
 | `set_favorite(id, bool)` | 强制设置收藏状态 |
-| `query_wallpapers(search, wp_type, tags, favorites_only, order_by)` | 多条件查询 |
-| `get_all_tags()` | 获取所有去重标签 |
-| `get_stats()` | 统计信息 |
+| `query_wallpapers(search, wp_type, tags, favorites_only, order_by, search_mode, tags_mode, exclude_tags, content_rating)` | 多条件查询 |
+| `get_all_tags()` | 获取所有去重标签（字母排序） |
+| `get_all_ratings()` | 获取所有去重内容分级（按出现频次降序） |
+| `get_stats()` | 统计信息（total / favorites / by_type） |
 | `remove_wallpaper(path)` | 按路径删除记录 |
+| `rename_tag(old, new)` | 重命名标签，返回受影响壁纸数 |
+| `merge_tags(sources, target)` | 合并多个标签为一个，返回受影响壁纸数 |
+| `delete_tag(name)` | 从所有壁纸中删除标签，返回受影响壁纸数 |
+| `update_wallpaper_tags(id, tags)` | 直接更新指定壁纸的标签列表 |
+| `get_tag_stats()` | 标签使用次数统计（`[{"name": ..., "count": ...}]`，按次数降序） |
+| `backup_database(max_backups)` | 备份数据库文件，返回备份路径或 None |
 
 ### thumbnail_worker.py
 
@@ -318,8 +325,7 @@ def backup_database(max_backups: int = 3) -> Optional[Path]
 | `tags_mode` | str | `"any"` | `any`(匹配任一) / `all`(匹配全部) |
 | `exclude_tags` | list | None | 排除的标签列表 |
 
-- 正则搜索先用 LIKE 初筛，Python 侧 `re.compile()` 精确匹配
-- 无效正则返回空结果（不抛异常）
+- 正则搜索在 SQLite 引擎侧通过自定义 `REGEXP` 函数过滤（`db.py` 注册 `_sqlite_regexp`），无效正则直接返回空结果（不抛异常）
 - 排除标签在 Python 侧后处理
 
 ## 主题系统 (ui/theme.py)
@@ -428,8 +434,9 @@ register_theme("ocean", { ... })
 | `ThumbnailWorker` | 缩略图生成 | ✅ `cancel()` | ✅ QThread |
 | `ExportWorker` | 导出 JSON | ✅ `cancel()` | ✅ QThread |
 | `ImportWorker` | 导入 JSON | ✅ `cancel()` | ✅ QThread |
+| `VersionCheckWorker` | 检查 GitHub 最新 Release | ❌ | ✅ QThread |
 
-所有线程在 `MainWindow.closeEvent` 中统一清理（cancel + wait 2s）。
+所有线程在 `MainWindow.closeEvent` 中统一清理（cancel + wait 2s）。`VersionCheckWorker` 的引用保存在 `window._version_checker` 以防 GC 提前回收。
 
 ## 多选机制
 
@@ -523,7 +530,6 @@ pip install PySide6-Multimedia
 1. **WE WebSocket 控制不可用** — Wallpaper Engine 没有公开 API，相关代码已清理
 2. **仅支持 Windows** — 壁纸设置功能依赖 Windows API 和 WE 官方 CLI
 3. **无自动更新机制** — 已集成 GitHub Release 版本检查，但需用户手动下载
-4. **无自动更新机制** — 用户需手动下载新版本
 
 ## Code Review 记录
 

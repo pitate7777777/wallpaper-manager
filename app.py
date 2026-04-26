@@ -2,6 +2,7 @@
 import logging
 import re
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
@@ -43,11 +44,11 @@ def _setup_logging():
 
     handlers = [
         logging.StreamHandler(),
-        logging.FileHandler(
+        RotatingFileHandler(
             log_dir / "wallpaper-manager.log",
-            encoding="utf-8",
             maxBytes=5 * 1024 * 1024,  # 5MB
             backupCount=3,
+            encoding="utf-8",
         ),
     ]
 

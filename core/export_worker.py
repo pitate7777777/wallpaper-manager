@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
 
@@ -17,7 +18,7 @@ class ExportWorker(QThread):
     finished = Signal(bool, str)  # success, message
 
     def __init__(self, output_path: str, favorites_only: bool = True,
-                 wallpaper_ids: set[int] = None):
+                 wallpaper_ids: Optional[set[int]] = None):
         super().__init__()
         self.output_path = output_path
         self.favorites_only = favorites_only

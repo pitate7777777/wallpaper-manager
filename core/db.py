@@ -32,8 +32,14 @@ SCHEMA_VERSION: int = 2
 def _migrate_v1(conn: sqlite3.Connection) -> None:
     """v1: 初始 schema — wallpapers 表及索引。
 
-    全新安装时由 init_db() 中的 CREATE TABLE 语句直接创建，
-    此函数留空，仅作为迁移链的起点占位。
+    全新安装时，init_db() 中的 CREATE TABLE IF NOT EXISTS 语句已直接建好表结构，
+    此函数有意留空，仅作为迁移链的起点占位符（version 0 → 1）。
+
+    【全新安装行为说明】
+    全新安装时 _get_current_version 返回 0，_run_migrations 会依次执行
+    v1（空操作）→ v2 → ... → 最新版本，最终将 schema_version 写为
+    SCHEMA_VERSION，确保迁移链从第一个版本起始，与升级路径保持一致。
+    后续维护者勿将此函数改为非幂等操作，因为全新安装时它总会被调用。
     """
     pass
 
@@ -213,7 +219,11 @@ def _row_to_wallpaper(row: sqlite3.Row) -> Wallpaper:
 
 
 def upsert_wallpaper(wp: Wallpaper) -> int:
-    """插入或更新壁纸记录"""
+    """插入或更新壁纸记录
+
+    ON CONFLICT 策略：仅更新元数据字段（标题、类型、标签等），
+    有意**不覆盖 is_favorite**，确保用户手动收藏的状态在重新扫描后不会丢失。
+    """
     with get_connection() as conn:
         cursor = conn.execute("""
             INSERT INTO wallpapers (folder_path, workshop_id, title, wp_type, file,
@@ -231,6 +241,7 @@ def upsert_wallpaper(wp: Wallpaper) -> int:
                 description=excluded.description,
                 scheme_color=excluded.scheme_color,
                 extra_data=excluded.extra_data
+                -- is_favorite 有意不更新，保留用户收藏状态
         """, (
             wp.folder_path, wp.workshop_id, wp.title, wp.wp_type,
             wp.file, wp.preview, json.dumps(wp.tags, ensure_ascii=False),
@@ -299,8 +310,10 @@ def query_wallpapers(
 
         if search:
             if search_mode == "exact":
-                conditions.append("(title = ? OR tags = ?)")
-                params.extend([search, search])
+                # 精确匹配：title 完全相等；tags 匹配 JSON 数组中的精确元素
+                # 用 %"<term>"% 确保匹配 JSON 字符串中的完整词，不会误匹配子串
+                conditions.append('(title = ? OR tags LIKE ?)')
+                params.extend([search, f'%"{search}"%'])
             elif search_mode == "regex":
                 # 正则搜索：通过 SQLite REGEXP 函数在数据库侧过滤
                 # 避免将全部记录加载到 Python 内存中
