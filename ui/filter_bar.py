@@ -1,4 +1,6 @@
 """搜索和过滤栏 - 增加目录管理、导入导出、壁纸轮换、主题切换、卡片尺寸、高级搜索"""
+import sys
+
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLineEdit, QComboBox,
     QPushButton, QCheckBox, QMenu, QToolButton,
@@ -7,6 +9,8 @@ from PySide6.QtGui import QAction
 from PySide6.QtCore import Signal, QEvent, Qt
 
 from ui.theme import COLORS
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 class FilterBar(QWidget):
@@ -28,6 +32,7 @@ class FilterBar(QWidget):
     tag_manager_clicked = Signal()
     search_mode_changed = Signal(str)          # "simple" / "regex" / "exact"
     exclude_tags_changed = Signal(list)        # 排除标签列表
+    rating_changed = Signal(str)               # 内容分级过滤
 
     # 搜索模式定义
     SEARCH_MODES = [
@@ -83,6 +88,14 @@ class FilterBar(QWidget):
         )
         layout.addWidget(self.type_combo)
 
+        # 内容分级过滤
+        self.rating_combo = QComboBox()
+        self.rating_combo.addItem("全部分级", "")
+        self.rating_combo.currentIndexChanged.connect(
+            lambda _: self.rating_changed.emit(self.rating_combo.currentData())
+        )
+        layout.addWidget(self.rating_combo)
+
         # 标签过滤（多选按钮 + 弹出面板）
         self.tag_btn = QPushButton("🏷️ 全部标签")
         self.tag_btn.setObjectName("tagBtn")
@@ -117,11 +130,11 @@ class FilterBar(QWidget):
         layout.addWidget(self.fav_check)
 
         # 分隔
-        sep = QWidget()
-        sep.setFixedWidth(1)
-        sep.setStyleSheet(f"background: {COLORS['separator']};")
-        sep.setFixedHeight(20)
-        layout.addWidget(sep)
+        self._sep1 = QWidget()
+        self._sep1.setFixedWidth(1)
+        self._sep1.setStyleSheet(f"background: {COLORS['separator']};")
+        self._sep1.setFixedHeight(20)
+        layout.addWidget(self._sep1)
 
         # 导入导出
         self.export_btn = QPushButton("📤 导出")
@@ -146,14 +159,15 @@ class FilterBar(QWidget):
         self.scan_btn.clicked.connect(self.scan_clicked.emit)
         layout.addWidget(self.scan_btn)
 
-        # 分隔
-        sep2 = QWidget()
-        sep2.setFixedWidth(1)
-        sep2.setStyleSheet(f"background: {COLORS['separator']};")
-        sep2.setFixedHeight(20)
-        layout.addWidget(sep2)
+        # 分隔（仅 Windows，壁纸轮换相关）
+        self._sep2 = QWidget()
+        self._sep2.setFixedWidth(1)
+        self._sep2.setStyleSheet(f"background: {COLORS['separator']};")
+        self._sep2.setFixedHeight(20)
+        self._sep2.setVisible(IS_WINDOWS)
+        layout.addWidget(self._sep2)
 
-        # 壁纸轮换按钮
+        # 壁纸轮换按钮（仅 Windows）
         self.rotation_btn = QPushButton("🔄 自动轮换")
         self.rotation_btn.setObjectName("rotationBtn")
         self.rotation_btn.setToolTip("点击开启/关闭壁纸自动轮换\n右键可设置轮换参数")
@@ -162,14 +176,16 @@ class FilterBar(QWidget):
         self.rotation_btn.clicked.connect(self._on_rotation_clicked)
         # 通过 eventFilter 拦截右键菜单
         self.rotation_btn.installEventFilter(self)
+        self.rotation_btn.setVisible(IS_WINDOWS)
         layout.addWidget(self.rotation_btn)
 
-        # 分隔
-        sep3 = QWidget()
-        sep3.setFixedWidth(1)
-        sep3.setStyleSheet(f"background: {COLORS['separator']};")
-        sep3.setFixedHeight(20)
-        layout.addWidget(sep3)
+        # 分隔（仅 Windows，壁纸轮换相关）
+        self._sep3 = QWidget()
+        self._sep3.setFixedWidth(1)
+        self._sep3.setStyleSheet(f"background: {COLORS['separator']};")
+        self._sep3.setFixedHeight(20)
+        self._sep3.setVisible(IS_WINDOWS)
+        layout.addWidget(self._sep3)
 
         # 卡片尺寸
         self.size_combo = QComboBox()
@@ -425,3 +441,24 @@ class FilterBar(QWidget):
     def update_tags(self, tags: list[str]):
         """更新标签列表（供多选弹出面板使用）"""
         self._all_tags = tags
+
+    def update_ratings(self, ratings: list[str]):
+        """更新内容分级下拉框"""
+        current = self.rating_combo.currentData()
+        self.rating_combo.blockSignals(True)
+        self.rating_combo.clear()
+        self.rating_combo.addItem("全部分级", "")
+        for r in ratings:
+            self.rating_combo.addItem(r, r)
+        # 恢复之前的选择
+        if current:
+            idx = self.rating_combo.findData(current)
+            if idx >= 0:
+                self.rating_combo.setCurrentIndex(idx)
+        self.rating_combo.blockSignals(False)
+
+    def refresh_theme(self):
+        """主题切换后刷新 inline 样式"""
+        self._sep1.setStyleSheet(f"background: {COLORS['separator']};")
+        self._sep2.setStyleSheet(f"background: {COLORS['separator']};")
+        self._sep3.setStyleSheet(f"background: {COLORS['separator']};")

@@ -1,15 +1,16 @@
-"""壁纸设置模块 - 通过 Windows API 或 WE 配置设置壁纸
+"""壁纸设置模块 - 通过 Windows API 或 Wallpaper Engine CLI 设置壁纸
 
 支持:
 1. 静态图片壁纸: 通过 SystemParametersInfoW (支持 JPG/PNG/BMP)
-2. WE 动态壁纸: 通过命令行或配置文件
+2. WE 动态壁纸: 通过官方 CLI (-control openWallpaper)
 3. 获取当前壁纸路径
 4. 自动检测 Wallpaper Engine 安装路径
+
+参考: https://help.wallpaperengine.io/en/functionality/cli.html
 """
 
 import json
 import logging
-import os
 import platform
 import re
 import subprocess
@@ -51,20 +52,19 @@ class WallpaperSetter:
 
     # 壁纸样式映射 (名称 → WallpaperStyle 注册表值)
     WALLPAPER_STYLES = {
-        "center": "0",      # 居中
-        "tile": "0",        # 平铺（需要 TileWallpaper=1）
-        "stretch": "2",     # 拉伸
-        "fit": "6",         # 适应
-        "fill": "10",       # 填充
-        "span": "22",       # 跨越（多显示器）
+        "center": "0",
+        "tile": "0",
+        "stretch": "2",
+        "fit": "6",
+        "fill": "10",
+        "span": "22",
     }
+
+    # ── 静态图片壁纸 (Windows API) ───────────────────────────
 
     @staticmethod
     def set_wallpaper(image_path: str, style: str = "stretch") -> bool:
         """通过 Windows API 设置桌面壁纸
-
-        支持 JPG、PNG、BMP 等格式。
-        通过注册表设置壁纸路径，再调用 SystemParametersInfoW 生效。
 
         Args:
             image_path: 图片文件的绝对路径
@@ -82,20 +82,17 @@ class WallpaperSetter:
             logger.error(f"图片文件不存在: {image_path}")
             return False
 
-        # 检查文件扩展名
         valid_ext = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
         if path.suffix.lower() not in valid_ext:
             logger.warning(f"不支持的图片格式: {path.suffix}")
             return False
 
-        # 解析壁纸样式
         style_val = WallpaperSetter.WALLPAPER_STYLES.get(style, "2")
         is_tile = "1" if style == "tile" else "0"
 
         try:
             abs_path = str(path.resolve())
 
-            # 通过注册表设置壁纸路径（支持 JPG/PNG 等非 BMP 格式）
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
                 r"Control Panel\Desktop",
@@ -107,7 +104,6 @@ class WallpaperSetter:
             winreg.SetValueEx(key, "TileWallpaper", 0, winreg.REG_SZ, is_tile)
             winreg.CloseKey(key)
 
-            # 调用 SystemParametersInfoW 使设置生效
             result = ctypes.windll.user32.SystemParametersInfoW(
                 WallpaperSetter.SPI_SETDESKWALLPAPER,
                 0,
@@ -129,17 +125,12 @@ class WallpaperSetter:
 
     @staticmethod
     def get_current_wallpaper() -> Optional[str]:
-        """获取当前桌面壁纸路径
-
-        Returns:
-            当前壁纸的绝对路径，失败返回 None
-        """
+        """获取当前桌面壁纸路径"""
         if not IS_WINDOWS:
             logger.warning("get_current_wallpaper 仅支持 Windows 平台")
             return None
 
         try:
-            # 方式 1: 通过注册表读取
             key = winreg.OpenKey(
                 winreg.HKEY_CURRENT_USER,
                 r"Control Panel\Desktop",
@@ -150,19 +141,13 @@ class WallpaperSetter:
             winreg.CloseKey(key)
 
             if value and Path(value).exists():
-                logger.debug(f"当前壁纸: {value}")
                 return value
 
-            # 方式 2: 通过 SystemParametersInfoW 读取
             buf = ctypes.create_unicode_buffer(512)
             result = ctypes.windll.user32.SystemParametersInfoW(
-                WallpaperSetter.SPI_GETDESKWALLPAPER,
-                512,
-                buf,
-                0,
+                WallpaperSetter.SPI_GETDESKWALLPAPER, 512, buf, 0,
             )
             if result and buf.value:
-                logger.debug(f"当前壁纸 (API): {buf.value}")
                 return buf.value
 
             return None
@@ -171,19 +156,51 @@ class WallpaperSetter:
             logger.error(f"获取当前壁纸失败: {e}")
             return None
 
-    @staticmethod
-    def set_wallpaper_we(
-        wallpaper_path: str, we_exe_path: Optional[str] = None
-    ) -> bool:
-        """通过 Wallpaper Engine 设置动态壁纸
+    # ── WE 内部工具 ───────────────────────────────────────────
 
-        尝试方式:
-        1. 命令行参数 (-control openWallpaper)
-        2. 修改配置文件
+    @staticmethod
+    def _find_we_exe(we_exe_path: Optional[str] = None) -> Optional[str]:
+        """查找 WE 可执行文件路径
 
         Args:
-            wallpaper_path: 壁纸文件夹路径或 workshop ID
+            we_exe_path: 已知的路径，None 则自动检测
+
+        Returns:
+            可执行文件路径，未找到返回 None
+        """
+        if we_exe_path and Path(we_exe_path).exists():
+            return we_exe_path
+
+        we_path = WallpaperSetter.find_we_install()
+        if not we_path:
+            logger.error("未找到 Wallpaper Engine 安装路径")
+            return None
+
+        for name in ("wallpaper64.exe", "wallpaper32.exe"):
+            candidate = we_path / name
+            if candidate.exists():
+                return str(candidate)
+
+        logger.error(f"WE 目录中未找到可执行文件: {we_path}")
+        return None
+
+    # ── WE 动态壁纸 (官方 CLI) ────────────────────────────────
+
+    @staticmethod
+    def set_wallpaper_we(
+        wallpaper_path: str,
+        we_exe_path: Optional[str] = None,
+        monitor: Optional[int] = None,
+    ) -> bool:
+        """通过 Wallpaper Engine CLI 设置动态壁纸
+
+        官方 CLI 格式:
+            wallpaper64.exe -control openWallpaper -file <path> [-monitor N]
+
+        Args:
+            wallpaper_path: 壁纸文件夹路径、project.json 路径或实际壁纸文件路径
             we_exe_path: WE 可执行文件路径（可选，自动检测）
+            monitor: 显示器索引（0-based），None 则使用默认显示器
 
         Returns:
             是否设置成功
@@ -194,163 +211,268 @@ class WallpaperSetter:
 
         # 查找 WE 可执行文件
         if not we_exe_path:
-            we_path = WallpaperSetter.find_we_install()
-            if not we_path:
-                logger.error("未找到 Wallpaper Engine 安装路径")
+            we_exe_path = WallpaperSetter._find_we_exe()
+            if not we_exe_path:
                 return False
-            we_exe_path = str(we_path / "wallpaper64.exe")
-            if not Path(we_exe_path).exists():
-                we_exe_path = str(we_path / "wallpaper32.exe")
 
         if not Path(we_exe_path).exists():
             logger.error(f"WE 可执行文件不存在: {we_exe_path}")
             return False
 
-        # 判断 wallpaper_path 是文件夹还是 workshop ID
-        wp_path = Path(wallpaper_path)
-        if wp_path.exists() and wp_path.is_dir():
-            # 本地壁纸文件夹
-            project_json = wp_path / "project.json"
-            if project_json.exists():
-                return WallpaperSetter._apply_we_local(we_exe_path, str(wp_path))
-            else:
-                logger.warning(f"壁纸文件夹中没有 project.json: {wp_path}")
-                return False
-        elif wallpaper_path.isdigit():
-            # Workshop ID
-            return WallpaperSetter._apply_we_workshop(we_exe_path, wallpaper_path)
-        else:
-            logger.error(f"无效的壁纸路径或 ID: {wallpaper_path}")
+        # 解析目标文件路径
+        target_file = WallpaperSetter._resolve_we_target(wallpaper_path)
+        if not target_file:
             return False
 
+        return WallpaperSetter._apply_we_cli(we_exe_path, target_file, monitor)
+
     @staticmethod
-    def _apply_we_local(we_exe: str, folder_path: str) -> bool:
-        """通过 WE 应用本地壁纸
+    def _resolve_we_target(wallpaper_path: str) -> Optional[str]:
+        """解析壁纸路径，定位到 WE CLI 需要的 -file 参数值
 
-        Wallpaper Engine 支持的命令行格式:
-        wallpaper64.exe -control openWallpaper -path <folder_path>
+        根据官方文档:
+        - Scene 壁纸: 指向 project.json
+        - Video 壁纸: 指向 .mp4 文件
+        - Web 壁纸: 指向 index.html
 
-        注意: WE 的命令行 API 未正式文档化，以下命令基于社区逆向。
-        如果命令行方式失败，回退到配置文件方式。
+        Args:
+            wallpaper_path: 壁纸文件夹路径、project.json 路径或实际文件路径
+
+        Returns:
+            解析后的目标文件路径，失败返回 None
         """
+        p = Path(wallpaper_path)
+
+        # 情况 1: 直接指向 project.json 或具体文件
+        if p.is_file():
+            return str(p.resolve())
+
+        # 情况 2: 指向壁纸文件夹
+        if p.is_dir():
+            # 读取 project.json 确定壁纸类型和文件
+            project_json = p / "project.json"
+            if not project_json.exists():
+                logger.warning(f"壁纸文件夹中没有 project.json: {p}")
+                return None
+
+            try:
+                with open(project_json, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                wp_type = data.get("type", "")
+                wp_file = data.get("file", "")
+
+                if wp_type == "scene":
+                    # Scene 壁纸: 指向 project.json
+                    return str(project_json.resolve())
+                elif wp_type == "video" and wp_file:
+                    # Video 壁纸: 指向视频文件
+                    video_path = p / wp_file
+                    if video_path.exists():
+                        return str(video_path.resolve())
+                    else:
+                        logger.warning(f"视频文件不存在: {video_path}")
+                        return str(project_json.resolve())
+                elif wp_type == "web" and wp_file:
+                    # Web 壁纸: 指向 index.html
+                    web_path = p / wp_file
+                    if web_path.exists():
+                        return str(web_path.resolve())
+                    else:
+                        logger.warning(f"Web 文件不存在: {web_path}")
+                        return str(project_json.resolve())
+                else:
+                    # 其他类型: 回退到 project.json
+                    return str(project_json.resolve())
+
+            except Exception as e:
+                logger.warning(f"解析 project.json 失败: {e}")
+                # 回退: 尝试直接用 project.json
+                return str(project_json.resolve())
+
+        # 情况 3: 可能是 Workshop ID（纯数字）
+        if str(wallpaper_path).isdigit():
+            # 在 Steam Workshop 目录中查找
+            steam_libs = WallpaperSetter._find_steam_library_folders()
+            for lib in steam_libs:
+                wp_folder = (
+                    lib / "steamapps" / "workshop" / "content"
+                    / WallpaperSetter.WE_APP_ID / str(wallpaper_path)
+                )
+                if wp_folder.exists():
+                    return WallpaperSetter._resolve_we_target(str(wp_folder))
+
+            logger.error(f"未找到 Workshop 壁纸: {wallpaper_path}")
+            return None
+
+        logger.error(f"无效的壁纸路径: {wallpaper_path}")
+        return None
+
+    @staticmethod
+    def _apply_we_cli(we_exe: str, target_file: str, monitor: Optional[int] = None) -> bool:
+        """通过官方 CLI 设置壁纸
+
+        格式: wallpaper64.exe -control openWallpaper -file <path> [-monitor N]
+
+        参考: https://help.wallpaperengine.io/en/functionality/cli.html
+
+        Args:
+            we_exe: WE 可执行文件路径
+            target_file: 壁纸目标文件路径（project.json / .mp4 / index.html）
+            monitor: 显示器索引（0-based），None 则使用默认
+
+        Returns:
+            是否成功
+        """
+        cmd = [we_exe, "-control", "openWallpaper", "-file", target_file]
+        if monitor is not None:
+            cmd.extend(["-monitor", str(monitor)])
+
+        logger.info(f"执行 WE CLI: {' '.join(cmd)}")
+
         try:
-            # 方式 1: 命令行方式
-            cmd = [we_exe, "-control", "openWallpaper", "-path", folder_path]
-            logger.info(f"尝试命令行方式: {' '.join(cmd)}")
             creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             result = subprocess.run(
-                cmd, capture_output=True, timeout=10, creationflags=creation_flags
+                cmd, capture_output=True, timeout=15, creationflags=creation_flags,
             )
             if result.returncode == 0:
-                logger.info(f"WE 命令行方式成功: {folder_path}")
+                logger.info(f"WE 壁纸设置成功: {target_file}")
                 return True
             else:
-                logger.warning(
-                    f"WE 命令行方式失败 (code={result.returncode}): "
-                    f"{result.stderr.decode('utf-8', errors='replace')}"
+                stderr = result.stderr.decode("utf-8", errors="replace").strip()
+                stdout = result.stdout.decode("utf-8", errors="replace").strip()
+                logger.error(
+                    f"WE CLI 失败 (code={result.returncode}): "
+                    f"{stderr or stdout or '无错误输出'}"
                 )
-
-            # 方式 2: 配置文件方式
-            return WallpaperSetter._apply_we_config(folder_path)
-
-        except subprocess.TimeoutExpired:
-            logger.warning("WE 命令行超时，尝试配置文件方式")
-            return WallpaperSetter._apply_we_config(folder_path)
-        except Exception as e:
-            logger.error(f"应用 WE 壁纸失败: {e}")
-            return WallpaperSetter._apply_we_config(folder_path)
-
-    @staticmethod
-    def _apply_we_workshop(we_exe: str, workshop_id: str) -> bool:
-        """通过 Workshop ID 应用壁纸"""
-        # 先在 Steam Workshop 目录中查找对应文件夹
-        steam_libs = WallpaperSetter._find_steam_library_folders()
-        for lib in steam_libs:
-            wp_folder = lib / "steamapps" / "workshop" / "content" / WallpaperSetter.WE_APP_ID / workshop_id
-            if wp_folder.exists():
-                return WallpaperSetter._apply_we_local(we_exe, str(wp_folder))
-
-        logger.error(f"未找到 Workshop 壁纸: {workshop_id}")
-        return False
-
-    @staticmethod
-    def _apply_we_config(folder_path: str) -> bool:
-        """通过修改 WE 配置文件设置壁纸
-
-        WE 的配置文件位于:
-        %USERPROFILE%/Documents/my games/wallpaper_engine/
-
-        修改 general.conf 或类似配置文件，需要重启 WE 生效。
-        """
-        config_dir = Path.home() / "Documents" / "my games" / "wallpaper_engine"
-        if not config_dir.exists():
-            logger.warning(f"WE 配置目录不存在: {config_dir}")
-            return False
-
-        # 查找配置文件
-        config_file = config_dir / "general.conf"
-        if not config_file.exists():
-            # 尝试其他可能的配置文件名
-            for name in ["settings.json", "config.json", "general.json"]:
-                alt = config_dir / name
-                if alt.exists():
-                    config_file = alt
-                    break
-            else:
-                logger.warning("未找到 WE 配置文件")
                 return False
 
-        try:
-            # 读取现有配置
-            with open(config_file, "r", encoding="utf-8") as f:
-                content = f.read()
-
-            # WE 的配置格式是 key=value（不是标准 JSON）
-            # 尝试解析并修改
-            if config_file.suffix == ".json":
-                config = json.loads(content)
-                # JSON 格式配置
-                logger.info(f"WE JSON 配置文件: {config_file}")
-                # 具体字段需要根据 WE 版本确定
-                return False  # 需要实际 WE 环境测试
-            else:
-                # key=value 格式
-                lines = content.split("\n")
-                new_lines = []
-                found = False
-                for line in lines:
-                    if line.strip().startswith("wallpaper=") or line.strip().startswith("lastwallpaper="):
-                        new_lines.append(f"wallpaper={folder_path}")
-                        found = True
-                    else:
-                        new_lines.append(line)
-
-                if not found:
-                    new_lines.append(f"wallpaper={folder_path}")
-
-                with open(config_file, "w", encoding="utf-8") as f:
-                    f.write("\n".join(new_lines))
-
-                logger.info(f"WE 配置已更新，需要重启 Wallpaper Engine 生效")
-                return True
-
-        except Exception as e:
-            logger.error(f"修改 WE 配置失败: {e}")
+        except subprocess.TimeoutExpired:
+            logger.error("WE CLI 执行超时 (15s)")
             return False
+        except FileNotFoundError:
+            logger.error(f"WE 可执行文件不存在: {we_exe}")
+            return False
+        except Exception as e:
+            logger.error(f"WE CLI 执行异常: {e}")
+            return False
+
+    # ── WE CLI 辅助命令 ───────────────────────────────────────
+
+    @staticmethod
+    def we_pause(we_exe_path: Optional[str] = None) -> bool:
+        """暂停所有壁纸"""
+        return WallpaperSetter._we_simple_command("pause", we_exe_path)
+
+    @staticmethod
+    def we_play(we_exe_path: Optional[str] = None) -> bool:
+        """恢复播放"""
+        return WallpaperSetter._we_simple_command("play", we_exe_path)
+
+    @staticmethod
+    def we_stop(we_exe_path: Optional[str] = None) -> bool:
+        """停止所有壁纸"""
+        return WallpaperSetter._we_simple_command("stop", we_exe_path)
+
+    @staticmethod
+    def we_mute(we_exe_path: Optional[str] = None) -> bool:
+        """静音"""
+        return WallpaperSetter._we_simple_command("mute", we_exe_path)
+
+    @staticmethod
+    def we_unmute(we_exe_path: Optional[str] = None) -> bool:
+        """取消静音"""
+        return WallpaperSetter._we_simple_command("unmute", we_exe_path)
+
+    @staticmethod
+    def we_next_wallpaper(we_exe_path: Optional[str] = None) -> bool:
+        """切换到下一张壁纸"""
+        return WallpaperSetter._we_simple_command("nextWallpaper", we_exe_path)
+
+    @staticmethod
+    def we_get_current_wallpaper(monitor: Optional[int] = None) -> Optional[str]:
+        """获取当前 WE 壁纸路径
+
+        Args:
+            monitor: 显示器索引（0-based）
+
+        Returns:
+            当前壁纸路径字符串，失败返回 None
+        """
+        if not IS_WINDOWS:
+            return None
+
+        we_exe = WallpaperSetter._find_we_exe()
+        if not we_exe:
+            return None
+
+        cmd = [we_exe, "-control", "getCurrentWallpaper"]
+        if monitor is not None:
+            cmd.extend(["-monitor", str(monitor)])
+
+        try:
+            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            result = subprocess.run(
+                cmd, capture_output=True, timeout=10, creationflags=creation_flags,
+            )
+            if result.returncode == 0:
+                output = result.stdout.decode("utf-8", errors="replace").strip()
+                return output if output else None
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _we_simple_command(command: str, we_exe_path: Optional[str] = None) -> bool:
+        """执行简单的 WE CLI 命令（无额外参数）
+
+        Args:
+            command: 命令名（pause/play/stop/mute/unmute/nextWallpaper）
+            we_exe_path: WE 可执行文件路径
+
+        Returns:
+            是否成功
+        """
+        if not IS_WINDOWS:
+            logger.warning(f"WE {command} 仅支持 Windows 平台")
+            return False
+
+        we_exe_path = WallpaperSetter._find_we_exe(we_exe_path)
+        if not we_exe_path:
+            return False
+
+        cmd = [we_exe_path, "-control", command]
+        logger.info(f"执行 WE CLI: {' '.join(cmd)}")
+
+        try:
+            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            result = subprocess.run(
+                cmd, capture_output=True, timeout=10, creationflags=creation_flags,
+            )
+            if result.returncode == 0:
+                logger.info(f"WE {command} 成功")
+                return True
+            else:
+                logger.warning(f"WE {command} 失败 (code={result.returncode})")
+                return False
+        except Exception as e:
+            logger.error(f"WE {command} 异常: {e}")
+            return False
+
+    # ── WE 安装路径检测 ───────────────────────────────────────
 
     @staticmethod
     def find_we_install() -> Optional[Path]:
         """自动检测 Wallpaper Engine 安装路径
 
         检查顺序:
-        1. Steam 默认路径
+        1. Steam 库路径（解析 libraryfolders.vdf）
         2. Windows 注册表
         3. 常见安装目录
 
         Returns:
             WE 安装目录路径，未找到返回 None
         """
-        # 方式 1: 从 Steam 库路径查找
         steam_libs = WallpaperSetter._find_steam_library_folders()
         for lib in steam_libs:
             we_path = lib / "steamapps" / "common" / "wallpaper_engine"
@@ -358,7 +480,6 @@ class WallpaperSetter:
                 logger.info(f"找到 WE 安装路径: {we_path}")
                 return we_path
 
-        # 方式 2: 从注册表查找 Steam 路径（仅 Windows）
         if IS_WINDOWS:
             try:
                 key = winreg.OpenKey(
@@ -379,7 +500,6 @@ class WallpaperSetter:
             except Exception:
                 pass
 
-        # 方式 3: 常见路径暴力搜索
         common_we_paths = [
             Path("C:/Program Files (x86)/Steam/steamapps/common/wallpaper_engine"),
             Path("C:/Program Files/Steam/steamapps/common/wallpaper_engine"),
@@ -398,32 +518,25 @@ class WallpaperSetter:
 
     @staticmethod
     def _find_steam_library_folders() -> list[Path]:
-        """查找所有 Steam 库文件夹
-
-        从 Steam 的 libraryfolders.vdf 文件解析。
-
-        Returns:
-            Steam 库路径列表
-        """
+        """查找所有 Steam 库文件夹"""
         libraries = []
         vdf_parsed = False
 
         for steam_path in WallpaperSetter.STEAM_PATHS:
             if steam_path.exists():
-                # 添加默认路径
                 if steam_path not in libraries:
                     libraries.append(steam_path)
-                # 解析 VDF（只做一次）
                 if not vdf_parsed:
                     vdf_path = steam_path / "steamapps" / "libraryfolders.vdf"
                     if vdf_path.exists():
                         try:
-                            libraries.extend(WallpaperSetter._parse_libraryfolders_vdf(vdf_path))
+                            libraries.extend(
+                                WallpaperSetter._parse_libraryfolders_vdf(vdf_path)
+                            )
                         except Exception as e:
                             logger.debug(f"解析 libraryfolders.vdf 失败: {e}")
                         vdf_parsed = True
 
-        # 去重
         seen = set()
         unique = []
         for lib in libraries:
@@ -436,26 +549,14 @@ class WallpaperSetter:
 
     @staticmethod
     def _parse_libraryfolders_vdf(vdf_path: Path) -> list[Path]:
-        """解析 Steam 的 libraryfolders.vdf 文件
-
-        这是一个 Valve Data Format 文件，包含额外的 Steam 库路径。
-        简化解析：提取所有 "path" 字段的值。
-
-        Args:
-            vdf_path: libraryfolders.vdf 文件路径
-
-        Returns:
-            解析出的库路径列表
-        """
+        """解析 Steam 的 libraryfolders.vdf 文件"""
         libraries = []
         try:
             with open(vdf_path, "r", encoding="utf-8") as f:
                 content = f.read()
 
-            # 简单的正则提取 "path"  "X:\\..."
             paths = re.findall(r'"path"\s+"([^"]+)"', content)
             for p in paths:
-                # VDF 中的路径使用 \\\\ 双转义
                 clean_path = p.replace("\\\\", "\\")
                 lib_path = Path(clean_path)
                 if lib_path.exists():
@@ -464,65 +565,3 @@ class WallpaperSetter:
             logger.debug(f"解析 VDF 失败: {e}")
 
         return libraries
-
-    @staticmethod
-    def get_we_wallpaper_list() -> list[dict]:
-        """获取 Wallpaper Engine 壁纸列表
-
-        从 Steam Workshop 目录和本地项目目录中扫描。
-
-        Returns:
-            壁纸信息列表，每项包含 id, name, type, path
-        """
-        wallpapers = []
-
-        # Steam Workshop 目录
-        steam_libs = WallpaperSetter._find_steam_library_folders()
-        for lib in steam_libs:
-            workshop_dir = lib / "steamapps" / "workshop" / "content" / WallpaperSetter.WE_APP_ID
-            if workshop_dir.exists():
-                for item in workshop_dir.iterdir():
-                    if item.is_dir():
-                        project_json = item / "project.json"
-                        if project_json.exists():
-                            try:
-                                with open(project_json, "r", encoding="utf-8") as f:
-                                    data = json.load(f)
-                                wallpapers.append({
-                                    "id": item.name,
-                                    "name": data.get("title", item.name),
-                                    "type": data.get("type", "unknown"),
-                                    "path": str(item),
-                                    "source": "steam_workshop",
-                                })
-                            except Exception:
-                                wallpapers.append({
-                                    "id": item.name,
-                                    "name": item.name,
-                                    "type": "unknown",
-                                    "path": str(item),
-                                    "source": "steam_workshop",
-                                })
-
-        # 本地项目目录
-        local_projects = Path.home() / "Documents" / "my games" / "wallpaper_engine" / "projects" / "myprojects"
-        if local_projects.exists():
-            for item in local_projects.iterdir():
-                if item.is_dir():
-                    project_json = item / "project.json"
-                    if project_json.exists():
-                        try:
-                            with open(project_json, "r", encoding="utf-8") as f:
-                                data = json.load(f)
-                            wallpapers.append({
-                                "id": f"local_{item.name}",
-                                "name": data.get("title", item.name),
-                                "type": data.get("type", "unknown"),
-                                "path": str(item),
-                                "source": "local",
-                            })
-                        except Exception:
-                            pass
-
-        logger.info(f"找到 {len(wallpapers)} 个 WE 壁纸")
-        return wallpapers

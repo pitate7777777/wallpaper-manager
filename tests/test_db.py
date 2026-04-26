@@ -354,3 +354,45 @@ class TestTagManagement:
         rename_tag("old", "new")
         delete_tag("new")
         assert get_all_tags() == ["keep"]
+
+
+class TestContentRating:
+    """内容分级过滤测试"""
+
+    def test_get_all_ratings_empty(self):
+        from core.db import get_all_ratings
+        assert get_all_ratings() == []
+
+    def test_get_all_ratings(self):
+        from core.db import upsert_wallpaper, get_all_ratings
+        upsert_wallpaper(Wallpaper(folder_path="/r1", content_rating="Everyone"))
+        upsert_wallpaper(Wallpaper(folder_path="/r2", content_rating="Everyone"))
+        upsert_wallpaper(Wallpaper(folder_path="/r3", content_rating="Mature"))
+        upsert_wallpaper(Wallpaper(folder_path="/r4", content_rating=""))
+        ratings = get_all_ratings()
+        assert ratings[0] == "Everyone"  # 按频次降序
+        assert "Mature" in ratings
+        assert "" not in ratings  # 空分级不包含
+
+    def test_query_by_content_rating(self):
+        from core.db import upsert_wallpaper, query_wallpapers
+        upsert_wallpaper(Wallpaper(folder_path="/cr1", content_rating="Everyone"))
+        upsert_wallpaper(Wallpaper(folder_path="/cr2", content_rating="Mature"))
+        upsert_wallpaper(Wallpaper(folder_path="/cr3", content_rating="Everyone"))
+        results = query_wallpapers(content_rating="Everyone")
+        assert len(results) == 2
+        assert all(r.content_rating == "Everyone" for r in results)
+
+    def test_query_by_content_rating_no_match(self):
+        from core.db import upsert_wallpaper, query_wallpapers
+        upsert_wallpaper(Wallpaper(folder_path="/crn1", content_rating="Everyone"))
+        results = query_wallpapers(content_rating="Questionable")
+        assert len(results) == 0
+
+    def test_query_empty_rating_means_all(self):
+        from core.db import upsert_wallpaper, query_wallpapers
+        upsert_wallpaper(Wallpaper(folder_path="/cra1", content_rating="Everyone"))
+        upsert_wallpaper(Wallpaper(folder_path="/cra2", content_rating="Mature"))
+        upsert_wallpaper(Wallpaper(folder_path="/cra3", content_rating=""))
+        results = query_wallpapers(content_rating="")
+        assert len(results) == 3

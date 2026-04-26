@@ -1,7 +1,11 @@
 """右键上下文菜单"""
+import sys
+
 from PySide6.QtWidgets import QMenu
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Signal, QObject
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 class WallpaperContextMenu(QObject):
@@ -29,16 +33,17 @@ class WallpaperContextMenu(QObject):
             preview_action.triggered.connect(self.open_preview.emit)
             menu.addAction(preview_action)
 
-            # 设为桌面壁纸（静态图片类型时显示）
-            if wallpaper.wp_type == "scene":
+            # 设为桌面壁纸（仅 Windows，静态图片类型时显示）
+            if IS_WINDOWS and wallpaper.wp_type == "scene":
                 set_wp_action = QAction("🖼️ 设为桌面壁纸", menu)
                 set_wp_action.triggered.connect(self.set_as_wallpaper.emit)
                 menu.addAction(set_wp_action)
 
-            # 设为 WE 动态壁纸
-            set_we_action = QAction("🎬 设为 WE 壁纸", menu)
-            set_we_action.triggered.connect(self.set_as_we_wallpaper.emit)
-            menu.addAction(set_we_action)
+            # 设为 WE 动态壁纸（仅 Windows）
+            if IS_WINDOWS:
+                set_we_action = QAction("🎬 设为 WE 壁纸", menu)
+                set_we_action.triggered.connect(self.set_as_we_wallpaper.emit)
+                menu.addAction(set_we_action)
 
             folder_action = QAction("📁 打开文件夹", menu)
             folder_action.triggered.connect(self.open_folder.emit)

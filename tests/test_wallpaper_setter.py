@@ -1,4 +1,5 @@
 """core.wallpaper_setter 单元测试"""
+import json
 import platform
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -24,7 +25,6 @@ class TestConstants:
         assert len(WallpaperSetter.STEAM_PATHS) > 0
 
     def test_wallpaper_styles(self):
-        """壁纸样式映射完整性"""
         styles = WallpaperSetter.WALLPAPER_STYLES
         assert "center" in styles
         assert "stretch" in styles
@@ -32,9 +32,7 @@ class TestConstants:
         assert "fill" in styles
         assert "tile" in styles
         assert "span" in styles
-        # stretch 和 span 使用不同值
         assert styles["stretch"] != styles["span"]
-        # center 和 tile 的 WallpaperStyle 相同（区别在 TileWallpaper）
         assert styles["center"] == styles["tile"]
 
 
@@ -42,21 +40,17 @@ class TestSetWallpaper:
     """set_wallpaper 测试"""
 
     def test_returns_false_on_non_windows(self):
-        """非 Windows 平台应返回 False"""
         with patch("core.wallpaper_setter.IS_WINDOWS", False):
             result = WallpaperSetter.set_wallpaper("/some/image.jpg")
             assert result is False
 
     def test_returns_false_on_non_windows_with_style(self):
-        """非 Windows 平台带 style 参数应返回 False"""
         with patch("core.wallpaper_setter.IS_WINDOWS", False):
             result = WallpaperSetter.set_wallpaper("/some/image.jpg", style="fill")
             assert result is False
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Windows-only test")
     def test_returns_false_for_nonexistent_file(self):
-        """文件不存在时应返回 False（在 Windows 上）"""
-        # 在非 Windows 上，会直接返回 False（平台检查）
         result = WallpaperSetter.set_wallpaper("/nonexistent/image.jpg")
         assert result is False
 
@@ -65,7 +59,6 @@ class TestGetCurrentWallpaper:
     """get_current_wallpaper 测试"""
 
     def test_returns_none_on_non_windows(self):
-        """非 Windows 平台应返回 None"""
         with patch("core.wallpaper_setter.IS_WINDOWS", False):
             result = WallpaperSetter.get_current_wallpaper()
             assert result is None
@@ -75,28 +68,170 @@ class TestSetWallpaperWe:
     """set_wallpaper_we 测试"""
 
     def test_returns_false_on_non_windows(self):
-        """非 Windows 平台应返回 False"""
         with patch("core.wallpaper_setter.IS_WINDOWS", False):
             result = WallpaperSetter.set_wallpaper_we("/some/path")
             assert result is False
 
-    def test_returns_false_for_invalid_path(self):
-        """无效路径应返回 False"""
-        with patch("core.wallpaper_setter.IS_WINDOWS", True):
-            result = WallpaperSetter.set_wallpaper_we("not_a_path_or_id")
+
+class TestResolveWeTarget:
+    """_resolve_we_target 测试"""
+
+    def test_file_path_returned_directly(self, tmp_path):
+        """直接指向文件时原样返回"""
+        f = tmp_path / "project.json"
+        f.write_text("{}")
+        result = WallpaperSetter._resolve_we_target(str(f))
+        assert result == str(f.resolve())
+
+    def test_scene_folder_returns_project_json(self, tmp_path):
+        """Scene 类型壁纸文件夹返回 project.json"""
+        project = tmp_path / "project.json"
+        project.write_text(json.dumps({"type": "scene", "file": "scene.wpe"}))
+        result = WallpaperSetter._resolve_we_target(str(tmp_path))
+        assert result == str(project.resolve())
+
+    def test_video_folder_returns_video_file(self, tmp_path):
+        """Video 类型壁纸文件夹返回 .mp4 文件"""
+        mp4 = tmp_path / "video.mp4"
+        mp4.write_text("fake")
+        project = tmp_path / "project.json"
+        project.write_text(json.dumps({"type": "video", "file": "video.mp4"}))
+        result = WallpaperSetter._resolve_we_target(str(tmp_path))
+        assert result == str(mp4.resolve())
+
+    def test_video_folder_fallback_to_project_json(self, tmp_path):
+        """Video 文件不存在时回退到 project.json"""
+        project = tmp_path / "project.json"
+        project.write_text(json.dumps({"type": "video", "file": "missing.mp4"}))
+        result = WallpaperSetter._resolve_we_target(str(tmp_path))
+        assert result == str(project.resolve())
+
+    def test_web_folder_returns_index_html(self, tmp_path):
+        """Web 类型壁纸文件夹返回 index.html"""
+        html = tmp_path / "index.html"
+        html.write_text("<html/>")
+        project = tmp_path / "project.json"
+        project.write_text(json.dumps({"type": "web", "file": "index.html"}))
+        result = WallpaperSetter._resolve_we_target(str(tmp_path))
+        assert result == str(html.resolve())
+
+    def test_missing_project_json_returns_none(self, tmp_path):
+        """没有 project.json 的文件夹返回 None"""
+        result = WallpaperSetter._resolve_we_target(str(tmp_path))
+        assert result is None
+
+    def test_invalid_path_returns_none(self):
+        """无效路径返回 None"""
+        result = WallpaperSetter._resolve_we_target("/nonexistent/path/12345")
+        assert result is None
+
+    def test_invalid_json_returns_project_json_fallback(self, tmp_path):
+        """project.json 解析失败时回退到 project.json 本身"""
+        project = tmp_path / "project.json"
+        project.write_text("NOT JSON {{{")
+        result = WallpaperSetter._resolve_we_target(str(tmp_path))
+        assert result == str(project.resolve())
+
+
+class TestApplyWeCli:
+    """_apply_we_cli 测试"""
+
+    def test_success(self, tmp_path):
+        """CLI 成功执行"""
+        mock_exe = tmp_path / "wallpaper64.exe"
+        mock_exe.write_text("")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = WallpaperSetter._apply_we_cli(str(mock_exe), "/wallpaper/project.json")
+            assert result is True
+            # 验证命令格式
+            args = mock_run.call_args[0][0]
+            assert "-control" in args
+            assert "openWallpaper" in args
+            assert "-file" in args
+            assert "/wallpaper/project.json" in args
+
+    def test_with_monitor(self, tmp_path):
+        """指定显示器参数"""
+        mock_exe = tmp_path / "wallpaper64.exe"
+        mock_exe.write_text("")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = WallpaperSetter._apply_we_cli(
+                str(mock_exe), "/wallpaper/project.json", monitor=1
+            )
+            assert result is True
+            args = mock_run.call_args[0][0]
+            assert "-monitor" in args
+            assert "1" in args
+
+    def test_failure_returns_false(self, tmp_path):
+        """CLI 失败返回 False"""
+        mock_exe = tmp_path / "wallpaper64.exe"
+        mock_exe.write_text("")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr=b"error message",
+                stdout=b"",
+            )
+            result = WallpaperSetter._apply_we_cli(str(mock_exe), "/bad/path")
             assert result is False
+
+    def test_timeout_returns_false(self, tmp_path):
+        """超时返回 False"""
+        import subprocess
+        mock_exe = tmp_path / "wallpaper64.exe"
+        mock_exe.write_text("")
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=15)
+            result = WallpaperSetter._apply_we_cli(str(mock_exe), "/wallpaper/project.json")
+            assert result is False
+
+
+class TestWeSimpleCommands:
+    """WE 简单命令测试"""
+
+    def test_pause_on_non_windows(self):
+        with patch("core.wallpaper_setter.IS_WINDOWS", False):
+            assert WallpaperSetter.we_pause() is False
+
+    def test_play_on_non_windows(self):
+        with patch("core.wallpaper_setter.IS_WINDOWS", False):
+            assert WallpaperSetter.we_play() is False
+
+    def test_stop_on_non_windows(self):
+        with patch("core.wallpaper_setter.IS_WINDOWS", False):
+            assert WallpaperSetter.we_stop() is False
+
+    def test_mute_on_non_windows(self):
+        with patch("core.wallpaper_setter.IS_WINDOWS", False):
+            assert WallpaperSetter.we_mute() is False
+
+    def test_unmute_on_non_windows(self):
+        with patch("core.wallpaper_setter.IS_WINDOWS", False):
+            assert WallpaperSetter.we_unmute() is False
+
+    def test_next_wallpaper_on_non_windows(self):
+        with patch("core.wallpaper_setter.IS_WINDOWS", False):
+            assert WallpaperSetter.we_next_wallpaper() is False
 
 
 class TestFindWeInstall:
     """find_we_install 测试"""
 
-    def test_returns_none_on_non_windows(self):
-        """非 Windows 平台应返回 None"""
-        with patch("core.wallpaper_setter.IS_WINDOWS", False):
-            result = WallpaperSetter.find_we_install()
-            # 在非 Windows 上仍然会尝试查找路径（不依赖平台）
-            # 但通常不会有 WE 安装
-            # 只要不崩溃即可
+    def test_returns_none_when_not_found(self):
+        with patch.object(WallpaperSetter, "_find_steam_library_folders", return_value=[]):
+            if IS_WINDOWS:
+                with patch("core.wallpaper_setter.winreg"):
+                    result = WallpaperSetter.find_we_install()
+            else:
+                result = WallpaperSetter.find_we_install()
+            # 没有 Steam 安装时应该返回 None
             assert result is None or isinstance(result, Path)
 
 
@@ -104,7 +239,6 @@ class TestParseLibraryfoldersVdf:
     """_parse_libraryfolders_vdf 测试"""
 
     def test_parse_valid_vdf(self, tmp_path):
-        """解析有效的 VDF 文件"""
         vdf_content = '''
 "libraryfolders"
 {
@@ -116,44 +250,20 @@ class TestParseLibraryfoldersVdf:
             "431960"	"12345"
         }
     }
-    "1"
-    {
-        "path"	"D:\\\\SteamLibrary"
-        "apps"
-        {
-            "431960"	"67890"
-        }
-    }
 }
 '''
         vdf_file = tmp_path / "libraryfolders.vdf"
         vdf_file.write_text(vdf_content, encoding="utf-8")
-
-        # 注意：由于路径可能不存在，解析出的路径会被过滤
-        # 这里只测试解析逻辑不崩溃
         result = WallpaperSetter._parse_libraryfolders_vdf(vdf_file)
         assert isinstance(result, list)
 
     def test_parse_empty_vdf(self, tmp_path):
-        """解析空 VDF 文件"""
         vdf_file = tmp_path / "libraryfolders.vdf"
         vdf_file.write_text("", encoding="utf-8")
-
         result = WallpaperSetter._parse_libraryfolders_vdf(vdf_file)
         assert result == []
 
     def test_parse_nonexistent_file(self, tmp_path):
-        """解析不存在的文件"""
         vdf_file = tmp_path / "nonexistent.vdf"
         result = WallpaperSetter._parse_libraryfolders_vdf(vdf_file)
         assert result == []
-
-
-class TestGetWeWallpaperList:
-    """get_we_wallpaper_list 测试"""
-
-    def test_returns_empty_when_no_steam(self):
-        """没有 Steam 安装时应返回空列表"""
-        with patch.object(WallpaperSetter, "_find_steam_library_folders", return_value=[]):
-            result = WallpaperSetter.get_we_wallpaper_list()
-            assert result == []

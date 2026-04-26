@@ -56,10 +56,6 @@ a = Analysis(
         'PIL.ImageQt',
         'PIL.ImageDraw',
         'PIL.ImageFont',
-        # websockets
-        'websockets',
-        'websockets.client',
-        'websockets.exceptions',
         # 项目模块
         'core',
         'core.db',
@@ -69,7 +65,6 @@ a = Analysis(
         'core.export_worker',
         'core.wallpaper_setter',
         'core.rotation_worker',
-        'core.we_controller',
         'ui',
         'ui.main_window',
         'ui.filter_bar',

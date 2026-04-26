@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from core.we_controller import WallpaperEngineController, explore_we_protocol
+from deprecated.we_controller import WallpaperEngineController, explore_we_protocol
 
 
 class TestWallpaperEngineController:

@@ -198,6 +198,7 @@ def query_wallpapers(
     search_mode: str = "simple",
     tags_mode: str = "any",
     exclude_tags: list[str] = None,
+    content_rating: str = "",
 ) -> list[Wallpaper]:
     """查询壁纸列表
 
@@ -210,6 +211,7 @@ def query_wallpapers(
         search_mode: 搜索模式 - "simple"(LIKE), "regex", "exact"
         tags_mode: 标签匹配模式 - "any"(匹配任一) / "all"(匹配全部)
         exclude_tags: 要排除的标签列表
+        content_rating: 内容分级过滤
     """
     # 白名单校验，防止 SQL 注入
     order_map = {
@@ -256,6 +258,10 @@ def query_wallpapers(
         if favorites_only:
             conditions.append("is_favorite = 1")
 
+        if content_rating:
+            conditions.append("content_rating = ?")
+            params.append(content_rating)
+
         where = " AND ".join(conditions) if conditions else "1=1"
 
         rows = conn.execute(
@@ -297,6 +303,16 @@ def get_all_tags() -> list[str]:
         for tag in json.loads(row["tags"]):
             tag_set.add(tag)
     return sorted(tag_set)
+
+
+def get_all_ratings() -> list[str]:
+    """获取所有去重的内容分级（按出现频次降序）"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT content_rating, COUNT(*) as c FROM wallpapers "
+            "WHERE content_rating != '' GROUP BY content_rating ORDER BY c DESC"
+        ).fetchall()
+    return [r["content_rating"] for r in rows]
 
 
 def get_stats() -> dict:

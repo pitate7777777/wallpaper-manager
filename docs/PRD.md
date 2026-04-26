@@ -1,7 +1,7 @@
 # 需求文档 (PRD)
 
 > **项目名称**: Wallpaper Manager
-> **版本**: v0.3.0
+> **版本**: v0.4.0
 > **日期**: 2026-04-26
 > **状态**: Phase 3 完成
 
@@ -346,7 +346,7 @@ Wallpaper Engine 是 Steam 平台上的动态壁纸工具，用户通过 Worksho
 > 控制 API（端口 7884 为社区猜测）。Phase 2 改用 Windows API + 配置文件路线。
 > 详见 `core/we_controller.py` 中的调研记录。
 
-### Phase 3 — 高级功能 ✅ 大部分完成
+### Phase 3 — 高级功能 ✅ 完成
 
 | 功能 | 说明 | 状态 |
 |------|------|------|
@@ -355,7 +355,8 @@ Wallpaper Engine 是 Steam 平台上的动态壁纸工具，用户通过 Worksho
 | 标签管理 | 标签重命名、合并、删除 | ✅ 完成 |
 | PyInstaller 打包自动化 | 跨平台打包脚本 + 进度显示 | ✅ 完成 |
 | 高级搜索 | 正则/精确搜索 + 多标签组合 + 排除标签 | ✅ 完成 |
-| 云端同步 | 收藏列表云同步 | 📋 待定 |
+| 内容分级筛选 | 按 Everyone/Mature 等分级过滤壁纸 | ✅ 完成 |
+| WE CLI 集成 | 基于官方 CLI 的壁纸设置（`-control openWallpaper -file`） | ✅ 完成 |
 
 ---
 
@@ -371,29 +372,44 @@ wallpaper-manager/
 ├── requirements.txt        # 依赖清单
 ├── core/                   # 业务逻辑层
 │   ├── models.py           # 数据模型
-│   ├── db.py               # 数据库操作 + Schema 迁移
-│   ├── scanner.py          # 目录扫描
-│   ├── thumbnail_worker.py # 缩略图生成 + 清理
-│   ├── export_worker.py    # 导入/导出
-│   └── we_controller.py    # WE WebSocket PoC (调研)
+│   ├── db.py               # 数据库操作 + Schema 迁移 + 高级搜索
+│   ├── scanner.py          # 目录扫描 + project.json 解析
+│   ├── thumbnail_worker.py # 缩略图缓存生成 + 清理
+│   ├── export_worker.py    # 导入/导出后台线程
+│   ├── wallpaper_setter.py # 壁纸设置（Windows API + WE CLI）
+│   ├── rotation_worker.py  # 壁纸定时轮换
+│   ├── tag_manager.py      # 标签管理
+│   └── we_controller.py    # [已废弃] WE WebSocket PoC
 ├── ui/                     # 界面层
-│   ├── theme.py            # 主题颜色常量 + QSS 生成
-│   ├── main_window.py      # 主窗口
-│   ├── wallpaper_card.py   # 卡片组件
-│   ├── filter_bar.py       # 过滤栏
-│   ├── preview_dialog.py   # 预览弹窗
-│   ├── context_menu.py     # 右键菜单
-│   └── dir_manager_dialog.py # 目录管理
-├── tests/                  # 单元测试 (88 tests)
+│   ├── theme.py            # 多主题系统（暗色/亮色）
+│   ├── main_window.py      # 主窗口（网格 + 过滤 + 扫描）
+│   ├── wallpaper_card.py   # 壁纸卡片组件（可变尺寸）
+│   ├── filter_bar.py       # 顶部搜索过滤栏
+│   ├── preview_dialog.py   # 大图/视频预览弹窗
+│   ├── context_menu.py     # 右键上下文菜单
+│   ├── dir_manager_dialog.py # 多目录管理对话框
+│   ├── tag_manager_dialog.py # 标签管理对话框
+│   └── __init__.py
+├── deprecated/             # 已废弃模块（保留供参考）
+│   ├── we_controller.py    # WE WebSocket PoC（已确认无公开 API）
+│   └── test_we_controller.py
+├── scripts/
+│   └── build.py            # 跨平台打包脚本
+├── tests/                  # 单元测试 (187 passed)
 │   ├── conftest.py
 │   ├── test_models.py
 │   ├── test_db.py
 │   ├── test_scanner.py
-│   └── test_we_controller.py
+│   ├── test_wallpaper_setter.py
+│   ├── test_rotation_worker.py
+│   ├── test_tag_manager.py
+│   └── test_advanced_search.py
 ├── docs/
-│   ├── PRD.md              # 需求文档（本文件）
+│   ├── PRD.md              # 需求文档
 │   └── DEV.md              # 开发文档
-└── README.md               # 项目说明
+├── requirements.txt
+├── pyproject.toml
+└── README.md
 ```
 
 ---
@@ -522,3 +538,32 @@ wallpaper-manager/
 - `config.py` — 新增 `card_size` 和 `theme` 配置项
 
 **测试：** 186 passed, 12 skipped
+
+### v0.4.0 (2026-04-26) — 工程优化 + 功能完善
+
+**新增：**
+- `core/db.py` — 内容分级筛选
+  - `query_wallpapers()` 新增 `content_rating` 参数
+  - `get_all_ratings()` 获取所有去重分级（按频次降序）
+- `ui/filter_bar.py` — 内容分级下拉框（位于类型过滤之后）
+- `deprecated/` — 废弃模块目录，存放不再使用的代码
+
+**改进：**
+- `core/wallpaper_setter.py` — 基于官方 CLI 文档重写 WE 壁纸设置
+  - 使用 `-file` 参数（指向 project.json / .mp4 / index.html）替代 `-path`
+  - 新增 `_resolve_we_target()` 按壁纸类型解析正确目标文件
+  - 新增 `-monitor` 多显示器支持
+  - 新增 `we_pause/play/stop/mute/unmute/next_wallpaper/get_current` 辅助命令
+  - 移除无文档依据的配置文件回退方式
+- `ui/main_window.py` — 主题切换后刷新所有卡片 inline 样式 + filter_bar 分隔线
+- `ui/filter_bar.py` — 分隔线改为实例属性，新增 `refresh_theme()` 方法
+- `ui/context_menu.py` — 非 Windows 平台隐藏"设为桌面壁纸"和"设为 WE 壁纸"
+- `ui/filter_bar.py` — 非 Windows 平台隐藏壁纸轮换按钮及分隔线
+- `build.spec` — 移除 `websockets` hidden import
+- `requirements.txt` — 移除 `websockets` 依赖
+
+**废弃：**
+- `core/we_controller.py` → `deprecated/we_controller.py`（WE 无公开 WebSocket API）
+- `tests/test_we_controller.py` → `deprecated/test_we_controller.py`
+
+**测试：** 187 passed（+5 内容分级, +16 WE CLI, -20 已废弃 we_controller）

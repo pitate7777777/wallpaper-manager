@@ -15,6 +15,7 @@
 │  │目录管理   │ │缩略图缓存 │ │             │           │
 │  │主题切换   │ │           │ │             │           │
 │  │尺寸选择   │ │           │ │             │           │
+│  │分级过滤   │ │           │ │             │           │
 │  └────┬─────┘ └────┬─────┘ └─────┬──────┘           │
 │       │             │             │                   │
 │  ┌────▼──────┐ ┌────▼──────┐ ┌────▼──────┐          │
@@ -33,7 +34,7 @@
 │  │多目录扫描 │ │SQLite CRUD│ │数据模型     │           │
 │  │          │ │+ 迁移框架 │ │             │           │
 │  │          │ │+ 高级搜索 │ │             │           │
-│  │          │ │+ 标签管理 │ │             │           │
+│  │          │ │+ 分级过滤 │ │             │           │
 │  └──────────┘ └──────────┘ └────────────┘           │
 │  ┌───────────────────┐ ┌──────────────────┐         │
 │  │thumbnail_worker.py│ │export_worker.py  │         │
@@ -41,12 +42,12 @@
 │  └───────────────────┘ └──────────────────┘         │
 │  ┌───────────────────┐ ┌──────────────────┐         │
 │  │wallpaper_setter.py│ │rotation_worker.py│         │
-│  │壁纸设置(API+WE)   │ │定时轮换          │         │
+│  │壁纸设置(API+CLI)  │ │定时轮换          │         │
 │  └───────────────────┘ └──────────────────┘         │
-│  ┌───────────────────┐ ┌──────────────────┐         │
-│  │  tag_manager.py   │ │we_controller.py  │         │
-│  │标签重命名/合并/删除│ │WE WebSocket PoC  │         │
-│  └───────────────────┘ └──────────────────┘         │
+│  ┌───────────────────┐                               │
+│  │  tag_manager.py   │                               │
+│  │标签重命名/合并/删除│                               │
+│  └───────────────────┘                               │
 ├──────────────────────────────────────────────────────┤
 │              config.py (配置持久化)                    │
 ├──────────────────────────────────────────────────────┤
@@ -198,28 +199,12 @@ class ImportWorker(QThread):
 }
 ```
 
-### we_controller.py (PoC)
-
-```python
-class WallpaperEngineController:
-    async def connect(self) -> bool
-    async def disconnect(self)
-    async def get_wallpapers(self) -> list[dict]
-    async def set_wallpaper(wallpaper_id) -> bool
-    async def get_status(self) -> dict
-    # 同步包装器: connect_sync(), get_wallpapers_sync(), etc.
-```
-
-> ⚠️ **注意**：Wallpaper Engine 没有公开的 WebSocket 控制 API。此模块为调研 PoC，
-> 尝试连接多个可能的端点。生产环境建议使用 Windows API (`SystemParametersInfo`)
-> 或修改 WE 配置文件的方式。
-
 ### wallpaper_setter.py
 
 ```python
 class WallpaperSetter:
     @staticmethod
-    def set_wallpaper(image_path: str) -> bool
+    def set_wallpaper(image_path: str, style: str = "stretch") -> bool
     # 通过 Windows API SystemParametersInfoW 设置桌面壁纸
     # 支持 JPG/PNG/BMP/GIF/TIFF/WebP
 
@@ -228,21 +213,40 @@ class WallpaperSetter:
     # 获取当前桌面壁纸路径（注册表 + API）
 
     @staticmethod
-    def set_wallpaper_we(wallpaper_path: str, we_exe_path=None) -> bool
-    # 通过 WE 命令行或配置文件设置动态壁纸
+    def set_wallpaper_we(wallpaper_path, we_exe_path=None, monitor=None) -> bool
+    # 通过官方 CLI 设置 WE 动态壁纸
+    # 格式: wallpaper64.exe -control openWallpaper -file <path> [-monitor N]
 
     @staticmethod
     def find_we_install() -> Optional[Path]
     # 自动检测 WE 安装路径（Steam 库 + 注册表 + 常见路径）
 
+    # WE CLI 辅助命令
     @staticmethod
-    def get_we_wallpaper_list() -> list[dict]
-    # 列出所有 WE 壁纸（Steam Workshop + 本地项目）
+    def we_pause(we_exe_path=None) -> bool
+    @staticmethod
+    def we_play(we_exe_path=None) -> bool
+    @staticmethod
+    def we_stop(we_exe_path=None) -> bool
+    @staticmethod
+    def we_mute(we_exe_path=None) -> bool
+    @staticmethod
+    def we_unmute(we_exe_path=None) -> bool
+    @staticmethod
+    def we_next_wallpaper(we_exe_path=None) -> bool
+    @staticmethod
+    def we_get_current_wallpaper(monitor=None) -> Optional[str]
 ```
 
 - Windows-only 操作通过 `IS_WINDOWS` 平台检测守卫
+- WE CLI 参考: https://help.wallpaperengine.io/en/functionality/cli.html
+- `_find_we_exe()`: 统一 WE 可执行文件查找（wallpaper64.exe → wallpaper32.exe）
+- `_resolve_we_target()`: 根据壁纸类型解析 `-file` 参数值
+  - Scene → `project.json`
+  - Video → `.mp4` 文件
+  - Web → `index.html`
 - WE 安装检测：解析 Steam `libraryfolders.vdf` + 注册表 + 常见路径
-- 壁纸设置：先注册表写入路径，再 `SystemParametersInfoW` 生效
+- 静态壁纸设置：先注册表写入路径，再 `SystemParametersInfoW` 生效
 
 ### rotation_worker.py
 
@@ -450,25 +454,24 @@ register_theme("ocean", { ... })
 python -m pytest tests/ -v
 ```
 
-当前 186 个测试用例（12 skipped）：
+当前 187 个测试用例（rotation_worker 12 个需 PySide6 显示环境）：
 
 | 文件 | 用例数 | 覆盖范围 |
 |------|--------|----------|
-| `test_db.py` | 35 | CRUD、查询过滤、排序、标签去重、统计 |
+| `test_db.py` | 40 | CRUD、查询过滤、排序、标签去重、统计、内容分级 |
 | `test_tag_manager.py` | 33 | 标签管理、重命名、合并、删除 |
+| `test_wallpaper_setter.py` | 31 | 平台检测、VDF 解析、常量、WE CLI、目标解析 |
 | `test_models.py` | 27 | Wallpaper 数据类属性、边界值、默认值 |
 | `test_advanced_search.py` | 27 | 高级搜索、正则、精确匹配、排除标签 |
-| `test_we_controller.py` | 20 | 初始化、连接、命令、同步包装器、探索函数 |
 | `test_scanner.py` | 16 | project.json 解析、畸形数据容错、Unicode |
-| `test_wallpaper_setter.py` | 15 | 平台检测、VDF 解析、常量验证 |
 | `test_theme.py` | 13 | 主题切换、键一致性、样式表生成 |
-| `test_rotation_worker.py` | 12 (12 skip) | 初始化、pick_next、刷新、生命周期（需 PySide6） |
+| `test_rotation_worker.py` | 12 | 初始化、pick_next、刷新、生命周期（需 PySide6） |
 
 测试策略：
 - db 测试通过 `monkeypatch` 重定向到临时数据库，不污染真实数据
 - scanner 测试用 `tmp_path` 创建假壁纸目录结构
+- wallpaper_setter 测试用 `unittest.mock` 模拟 subprocess 调用
 - 每个测试用例独立，autouse fixture 自动初始化空库
-- WE 控制器测试使用 `unittest.mock` 模拟 WebSocket
 
 ## 打包
 
@@ -515,6 +518,28 @@ pip install PySide6-Multimedia
 - `theme.py` 模块加载时自动校验主题键一致性
 - `config.py` 默认配置新增 `card_size` 和 `theme` 字段
 - 全部 186 个测试通过（12 skipped）
+
+### v0.4.0 (2026-04-26)
+
+- `core/wallpaper_setter.py` 重写 WE 壁纸设置
+  - 使用官方 CLI `-control openWallpaper -file <path>` 替代 `-path`
+  - 新增 `_resolve_we_target()` 按壁纸类型解析目标文件（scene→project.json, video→.mp4, web→index.html）
+  - 新增 `_find_we_exe()` 统一 WE 可执行文件查找
+  - 新增 `-monitor` 多显示器支持
+  - 新增 `we_pause/play/stop/mute/unmute/next_wallpaper/get_current` 辅助命令
+  - 移除无文档依据的 `_apply_we_config` 配置文件回退
+  - 移除 `get_we_wallpaper_list()`（与 `core/scanner.py` 重复）
+- `core/db.py` 新增内容分级筛选
+  - `query_wallpapers()` 新增 `content_rating` 参数
+  - `get_all_ratings()` 获取所有去重分级
+- `ui/filter_bar.py` 新增 `rating_combo` 内容分级下拉框 + `rating_changed` 信号
+- `ui/main_window.py` 新增 `_on_rating_filter` / `_update_ratings`
+- `ui/main_window.py` 主题切换后刷新所有卡片 inline 样式 + filter_bar 分隔线
+- `ui/context_menu.py` / `ui/filter_bar.py` 非 Windows 平台隐藏壁纸设置/轮换 UI
+- `core/we_controller.py` → `deprecated/we_controller.py`（WE 无公开 WebSocket API）
+- 移除 `websockets` 依赖
+- `tests/test_wallpaper_setter.py` 重写（15→31 用例），`tests/test_db.py` 新增 5 个内容分级测试
+- 全部 187 个测试通过
 
 ### v0.2.0 (2026-04-26)
 

@@ -75,6 +75,7 @@ class MainWindow(QMainWindow):
         self._order_by = "title"
         self._search_mode = "simple"
         self._excluded_tags: list[str] = []
+        self._content_rating = ""
 
         # 显示设置
         cfg = load_config()
@@ -145,6 +146,7 @@ class MainWindow(QMainWindow):
         self.filter_bar.theme_changed.connect(self._on_theme_change)
         self.filter_bar.card_size_changed.connect(self._on_card_size_change)
         self.filter_bar.tag_manager_clicked.connect(self._on_tag_manager)
+        self.filter_bar.rating_changed.connect(self._on_rating_filter)
         main_layout.addWidget(self.filter_bar)
 
         # 统计 + 选择状态栏
@@ -218,11 +220,13 @@ class MainWindow(QMainWindow):
             search_mode=self._search_mode,
             tags_mode="any",
             exclude_tags=self._excluded_tags if self._excluded_tags else None,
+            content_rating=self._content_rating,
         )
         self._current_wallpapers = wallpapers
         self._populate_grid(wallpapers)
         self._update_stats()
         self._update_tags()
+        self._update_ratings()
 
     def _populate_grid(self, wallpapers: list[Wallpaper]):
         # 清空旧卡片
@@ -323,6 +327,16 @@ class MainWindow(QMainWindow):
         """排除标签变更"""
         self._excluded_tags = tags
         self._load_data()
+
+    def _on_rating_filter(self, rating: str):
+        """内容分级过滤"""
+        self._content_rating = rating
+        self._load_data()
+
+    def _update_ratings(self):
+        """更新内容分级下拉框选项"""
+        ratings = db.get_all_ratings()
+        self.filter_bar.update_ratings(ratings)
 
     def _reload_with_delay(self):
         if not hasattr(self, "_search_timer"):
@@ -653,6 +667,18 @@ class MainWindow(QMainWindow):
         """切换主题"""
         self._apply_theme(theme_name)
         self._current_theme = theme_name
+        # 刷新所有卡片的 inline 样式（卡片用 COLORS 值硬编码了边框/背景色）
+        for card in self._cards.values():
+            card._update_style()
+        # 刷新 stats_label / selection_label 等 inline 样式
+        self.stats_label.setStyleSheet(
+            f"color: {COLORS['text_muted']}; font-size: 12px;"
+        )
+        self.selection_label.setStyleSheet(
+            f"color: {COLORS['selection_text']}; font-size: 12px;"
+        )
+        # 刷新 filter_bar 分隔线等 inline 样式
+        self.filter_bar.refresh_theme()
         # 保存到配置
         cfg = load_config()
         cfg["theme"] = theme_name
