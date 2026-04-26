@@ -5,20 +5,22 @@
 ```
 ┌──────────────────────────────────────────────────────┐
 │                      app.py                          │
-│                (入口 + theme.py 生成 QSS)              │
+│          (入口 + config 读取主题 + QSS 生成)           │
 ├──────────────────────────────────────────────────────┤
 │                  UI 层 (ui/)                          │
 │  ┌──────────┐ ┌──────────┐ ┌────────────┐           │
 │  │FilterBar │ │CardGrid  │ │PreviewDlg  │           │
 │  │搜索/过滤  │ │网格+多选  │ │图片+视频    │           │
-│  │导入/导出  │ │右键菜单   │ │QMediaPlayer│           │
-│  │目录管理   │ │缩略图缓存 │ │收藏联动     │           │
+│  │导入/导出  │ │可调尺寸   │ │收藏联动     │           │
+│  │目录管理   │ │缩略图缓存 │ │             │           │
+│  │主题切换   │ │           │ │             │           │
+│  │尺寸选择   │ │           │ │             │           │
 │  └────┬─────┘ └────┬─────┘ └─────┬──────┘           │
 │       │             │             │                   │
-│  ┌────▼──────┐ ┌────▼──────┐     │                  │
-│  │DirManager │ │ContextMenu│     │                  │
-│  │多目录管理  │ │批量操作    │     │                  │
-│  └───────────┘ └───────────┘     │                  │
+│  ┌────▼──────┐ ┌────▼──────┐ ┌────▼──────┐          │
+│  │DirManager │ │ContextMenu│ │TagManager │          │
+│  │多目录管理  │ │批量操作    │ │标签管理    │          │
+│  └───────────┘ └───────────┘ └───────────┘          │
 │  ┌──────────────────────────────────────┐           │
 │  │ theme.py — 多主题系统 + QSS 生成       │           │
 │  │ THEMES + set_theme() + COLORS dict   │           │
@@ -30,15 +32,21 @@
 │  │scanner.py│ │  db.py   │ │ models.py  │           │
 │  │多目录扫描 │ │SQLite CRUD│ │数据模型     │           │
 │  │          │ │+ 迁移框架 │ │             │           │
+│  │          │ │+ 高级搜索 │ │             │           │
+│  │          │ │+ 标签管理 │ │             │           │
 │  └──────────┘ └──────────┘ └────────────┘           │
 │  ┌───────────────────┐ ┌──────────────────┐         │
 │  │thumbnail_worker.py│ │export_worker.py  │         │
 │  │缩略图生成 + 清理   │ │导入/导出(可取消)  │         │
 │  └───────────────────┘ └──────────────────┘         │
-│  ┌──────────────────────────────────────┐           │
-│  │ we_controller.py — WE WebSocket PoC  │           │
-│  │ (调研 + 概念验证，非生产就绪)          │           │
-│  └──────────────────────────────────────┘           │
+│  ┌───────────────────┐ ┌──────────────────┐         │
+│  │wallpaper_setter.py│ │rotation_worker.py│         │
+│  │壁纸设置(API+WE)   │ │定时轮换          │         │
+│  └───────────────────┘ └──────────────────┘         │
+│  ┌───────────────────┐ ┌──────────────────┐         │
+│  │  tag_manager.py   │ │we_controller.py  │         │
+│  │标签重命名/合并/删除│ │WE WebSocket PoC  │         │
+│  └───────────────────┘ └──────────────────┘         │
 ├──────────────────────────────────────────────────────┤
 │              config.py (配置持久化)                    │
 ├──────────────────────────────────────────────────────┤
@@ -256,6 +264,33 @@ class RotationWorker(QObject):
 - 可选间隔：5/15/30/60/120 分钟
 - 壁纸列表在每次轮换时动态刷新（支持运行中收藏变化）
 
+### tag_manager.py
+
+```python
+def rename_tag(old_name: str, new_name: str) -> int
+def merge_tags(source_tags: list[str], target_tag: str) -> int
+def delete_tag(tag_name: str) -> int
+def get_tag_stats() -> list[dict]  # [{"name": "anime", "count": 42}, ...]
+```
+
+- 底层委托 `db.py` 执行，本模块负责日志记录
+- `db.py` 中的实现：遍历匹配的壁纸 → 修改 tags JSON 数组 → 去重 → commit
+- `TagManagerDialog`（`ui/tag_manager_dialog.py`）提供可视化管理界面
+
+### db.py 高级搜索
+
+`query_wallpapers()` 新增参数：
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `search_mode` | str | `"simple"` | `simple`(LIKE) / `regex` / `exact` |
+| `tags_mode` | str | `"any"` | `any`(匹配任一) / `all`(匹配全部) |
+| `exclude_tags` | list | None | 排除的标签列表 |
+
+- 正则搜索先用 LIKE 初筛，Python 侧 `re.compile()` 精确匹配
+- 无效正则返回空结果（不抛异常）
+- 排除标签在 Python 侧后处理
+
 ## 主题系统 (ui/theme.py)
 
 支持多主题切换。所有颜色集中在主题字典中，QSS 通过 `generate_stylesheet()` 函数生成：
@@ -438,10 +473,15 @@ python -m pytest tests/ -v
 ## 打包
 
 ```bash
-pyinstaller build.spec
+python scripts/build.py          # 跨平台打包脚本（推荐）
+build.bat                        # Windows 一键打包
+pyinstaller build.spec           # 直接调用 PyInstaller
 ```
 
 输出：`dist/WallpaperManager/WallpaperManager.exe`
+
+`scripts/build.py` 流程：clean → 检查依赖 → PyInstaller → verify → 打开输出目录。
+支持 `--clean-only`、`--no-open`、`--spec` 参数。
 
 注意：视频预览功能需要额外安装 `PySide6-Multimedia`：
 ```bash
@@ -465,18 +505,29 @@ pip install PySide6-Multimedia
 - `FilterBar` 新增主题切换按钮（🌙/☀️）和卡片尺寸下拉（小/中/大）
 - `WallpaperCard` 支持动态尺寸：`CARD_SIZES` 预设 + `size` 参数
 - `MainWindow` 主题切换保存 config + 刷新样式表，尺寸切换重建网格
+- 新增 `core/tag_manager.py` + `ui/tag_manager_dialog.py`（标签重命名/合并/删除）
+- `db.py` 新增 `rename_tag()` / `merge_tags()` / `delete_tag()` / `get_tag_stats()` / `update_wallpaper_tags()`
+- `db.py` `query_wallpapers()` 新增 `search_mode`（simple/regex/exact）、`tags_mode`（any/all）、`exclude_tags`
+- `FilterBar` 新增搜索模式切换按钮、标签多选弹出面板、排除标签按钮
+- 新增 `scripts/build.py` 跨平台打包脚本
+- 更新 `build.spec` / `build.bat` 包含所有新模块
+- 新增 `tests/test_tag_manager.py`（33 个测试）+ `tests/test_advanced_search.py`（27 个测试）
 - `theme.py` 模块加载时自动校验主题键一致性
 - `config.py` 默认配置新增 `card_size` 和 `theme` 字段
 - 全部 186 个测试通过（12 skipped）
 
 ### v0.2.0 (2026-04-26)
 
+- 新增 `core/wallpaper_setter.py`（壁纸设置，Windows API + WE 命令行，514 行）
+- 新增 `core/rotation_worker.py`（定时轮换，QTimer，200 行）
 - 新增 `core/we_controller.py`（WE WebSocket PoC，464 行）
+- 新增 `tests/test_wallpaper_setter.py`（13 个测试）
+- 新增 `tests/test_rotation_worker.py`（12 个测试）
 - 新增 `tests/test_we_controller.py`（20 个测试）
-- `context_menu.py` 新增 `apply_wallpaper` 信号
-- `main_window.py` 新增 `_apply_wallpaper_from_context()` 处理方法
+- 右键菜单新增"设为桌面壁纸"和"设为 WE 壁纸"
+- FilterBar 新增轮换按钮 + 间隔/模式设置
 - `requirements.txt` 新增 `websockets>=12.0`
-- 全部 88 个测试通过
+- 全部 103 个测试通过（12 skipped）
 
 ### v0.1.0 (2026-04-25)
 
