@@ -72,6 +72,13 @@ QMainWindow {{
     background-color: {c['bg_panel']};
     border-bottom: 1px solid {c['border']};
 }}
+#filterBarScroll {{
+    background: transparent;
+    border: none;
+}}
+#filterBarContainer {{
+    background: transparent;
+}}
 
 QLineEdit {{
     background-color: {c['bg_input']};

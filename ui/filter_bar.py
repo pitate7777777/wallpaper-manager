@@ -2,8 +2,8 @@
 import sys
 
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLineEdit, QComboBox,
-    QPushButton, QCheckBox, QMenu, QToolButton,
+    QWidget, QHBoxLayout, QVBoxLayout, QLineEdit, QComboBox,
+    QPushButton, QCheckBox, QMenu, QToolButton, QScrollArea,
 )
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Signal, QEvent, Qt
@@ -54,7 +54,23 @@ class FilterBar(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        layout = QHBoxLayout(self)
+        # 外层布局：垂直，包含滚动区域
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # 滚动区域：窗口过窄时水平滚动
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setObjectName("filterBarScroll")
+
+        # 内容容器
+        container = QWidget()
+        container.setObjectName("filterBarContainer")
+        layout = QHBoxLayout(container)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(8)
 
@@ -213,6 +229,10 @@ class FilterBar(QWidget):
         self.tag_mgr_btn.setToolTip("管理标签：重命名、合并、删除")
         self.tag_mgr_btn.clicked.connect(self.tag_manager_clicked.emit)
         layout.addWidget(self.tag_mgr_btn)
+
+        # 将内容容器放入滚动区域，滚动区域放入外层布局
+        scroll.setWidget(container)
+        outer.addWidget(scroll)
 
     def _cycle_search_mode(self):
         """循环切换搜索模式"""
