@@ -72,7 +72,7 @@ class TagManagerDialog(QDialog):
 
         # 统计
         self.stats_label = QLabel()
-        self.stats_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        self.stats_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
         layout.addWidget(self.stats_label)
 
         # 按钮栏

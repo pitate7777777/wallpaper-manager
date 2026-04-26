@@ -1,6 +1,20 @@
 """壁纸管理器 - 入口"""
 import sys
 import logging
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
+
+try:
+    __version__ = _pkg_version("wallpaper-manager")
+except PackageNotFoundError:
+    # 开发模式下未安装包，从 pyproject.toml 读取
+    import tomllib
+    from pathlib import Path
+    _pyproject = Path(__file__).parent / "pyproject.toml"
+    if _pyproject.exists():
+        with open(_pyproject, "rb") as _f:
+            __version__ = tomllib.load(_f).get("project", {}).get("version", "0.0.0")
+    else:
+        __version__ = "0.0.0"
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont

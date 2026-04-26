@@ -34,7 +34,7 @@ class DirManagerDialog(QDialog):
         # 说明
         info = QLabel("管理 Wallpaper Engine 壁纸库目录。可添加多个目录，扫描时会合并所有目录。")
         info.setWordWrap(True)
-        info.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 12px;")
+        info.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
         layout.addWidget(info)
 
         # 目录列表
@@ -86,7 +86,7 @@ class DirManagerDialog(QDialog):
 
         # 底部状态
         self.status_label = QLabel()
-        self.status_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 11px;")
+        self.status_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 11px;")
         layout.addWidget(self.status_label)
 
     def _populate_list(self):

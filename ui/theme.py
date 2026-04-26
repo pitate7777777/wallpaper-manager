@@ -236,12 +236,35 @@ QProgressBar::chunk {{
 }}
 
 /* ── 对话框 ──────────────────────────── */
-QMessageBox {{
-    background-color: {c['bg_panel']};
-}}
-
 QDialog {{
     background-color: {c['bg_main']};
+    color: {c['text_primary']};
+}}
+QDialog QLabel {{
+    color: {c['text_primary']};
+}}
+
+QMessageBox {{
+    background-color: {c['bg_panel']};
+    color: {c['text_primary']};
+}}
+QMessageBox QLabel {{
+    color: {c['text_primary']};
+}}
+
+QInputDialog {{
+    background-color: {c['bg_panel']};
+    color: {c['text_primary']};
+}}
+QInputDialog QLabel {{
+    color: {c['text_primary']};
+}}
+QInputDialog QLineEdit {{
+    background-color: {c['bg_input']};
+    color: {c['text_primary']};
+    border: 1px solid {c['border']};
+    border-radius: 4px;
+    padding: 4px 8px;
 }}
 
 /* ── 视频控制栏 ──────────────────────── */
@@ -262,6 +285,30 @@ QSlider::handle:horizontal:hover {{
 QSlider::sub-page:horizontal {{
     background: {c['border_focus']};
     border-radius: 2px;
+}}
+
+/* ── 提示框 ──────────────────────────── */
+QToolTip {{
+    background-color: {c['bg_panel']};
+    color: {c['text_primary']};
+    border: 1px solid {c['border']};
+    border-radius: 4px;
+    padding: 4px 8px;
+}}
+
+/* ── 分组框 ──────────────────────────── */
+QGroupBox {{
+    color: {c['text_primary']};
+    border: 1px solid {c['border']};
+    border-radius: 6px;
+    margin-top: 8px;
+    padding-top: 16px;
+    font-weight: bold;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 4px;
 }}
 """
 

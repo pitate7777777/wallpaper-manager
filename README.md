@@ -1,11 +1,13 @@
 # 🎨 Wallpaper Manager
 
+> **⚠️ 仅支持 Windows 10/11 平台。** 壁纸设置功能依赖 Windows API 和 Wallpaper Engine 官方 CLI，无法在 macOS / Linux 上运行。
+
 Wallpaper Engine 本地壁纸库管理工具 — 扫描、预览、搜索、收藏你的 WE 壁纸库。（本项目为AI生成）
 
+![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078d4?logo=windows)
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![PySide6](https://img.shields.io/badge/PySide6-6.6+-green)
 ![Tests](https://img.shields.io/badge/Tests-187%20passed-green)
-![Version](https://img.shields.io/badge/Version-v0.4.1-blue)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## ✨ 功能

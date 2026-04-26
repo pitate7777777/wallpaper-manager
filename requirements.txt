@@ -1,2 +1,6 @@
-PySide6>=6.6.0
-Pillow>=10.0.0
+# 依赖来源：pyproject.toml（单一事实源）
+# 安装方式：pip install -e .          （基础依赖）
+#           pip install -e ".[video]"  （含视频预览）
+#           pip install -e ".[dev]"    （含开发工具）
+
+-e .

@@ -82,7 +82,7 @@ class PreviewDialog(QDialog):
         ctrl_layout.addWidget(self.position_slider, 1)
 
         self.time_label = QLabel("0:00 / 0:00")
-        self.time_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 12px;")
+        self.time_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
         self.time_label.setFixedWidth(90)
         ctrl_layout.addWidget(self.time_label)
 
@@ -95,35 +95,51 @@ class PreviewDialog(QDialog):
         left_info = QVBoxLayout()
         left_info.setSpacing(4)
 
-        self.title_label = QLabel(f"<b>标题:</b> {self.wallpaper.title}")
+        _tc = COLORS['text_primary']
+        _ts = COLORS['text_secondary']
+
+        self.title_label = QLabel(
+            f"<b style='color:{_tc}'>标题:</b> <span style='color:{_ts}'>{self.wallpaper.title}</span>"
+        )
         self.title_label.setTextFormat(Qt.RichText)
         left_info.addWidget(self.title_label)
 
-        self.type_label = QLabel(f"<b>类型:</b> {self.wallpaper.type_emoji} {self.wallpaper.wp_type}")
+        self.type_label = QLabel(
+            f"<b style='color:{_tc}'>类型:</b> <span style='color:{_ts}'>{self.wallpaper.type_emoji} {self.wallpaper.wp_type}</span>"
+        )
         self.type_label.setTextFormat(Qt.RichText)
         left_info.addWidget(self.type_label)
 
-        self.tags_label = QLabel(f"<b>标签:</b> {self.wallpaper.tags_display or '无'}")
+        self.tags_label = QLabel(
+            f"<b style='color:{_tc}'>标签:</b> <span style='color:{_ts}'>{self.wallpaper.tags_display or '无'}</span>"
+        )
         self.tags_label.setTextFormat(Qt.RichText)
         left_info.addWidget(self.tags_label)
 
-        self.rating_label = QLabel(f"<b>分级:</b> {self.wallpaper.content_rating or '未知'}")
+        self.rating_label = QLabel(
+            f"<b style='color:{_tc}'>分级:</b> <span style='color:{_ts}'>{self.wallpaper.content_rating or '未知'}</span>"
+        )
         self.rating_label.setTextFormat(Qt.RichText)
         left_info.addWidget(self.rating_label)
 
-        self.file_label = QLabel(f"<b>文件:</b> {self.wallpaper.file}")
+        self.file_label = QLabel(
+            f"<b style='color:{_tc}'>文件:</b> <span style='color:{_ts}'>{self.wallpaper.file}</span>"
+        )
         self.file_label.setTextFormat(Qt.RichText)
         self.file_label.setWordWrap(True)
         left_info.addWidget(self.file_label)
 
-        self.workshop_label = QLabel(f"<b>Workshop ID:</b> {self.wallpaper.workshop_id}")
+        self.workshop_label = QLabel(
+            f"<b style='color:{_tc}'>Workshop ID:</b> <span style='color:{_ts}'>{self.wallpaper.workshop_id}</span>"
+        )
         self.workshop_label.setTextFormat(Qt.RichText)
         left_info.addWidget(self.workshop_label)
 
         if self.wallpaper.scheme_color_hex:
             color_label = QLabel(
-                f"<b>主题色:</b> <span style='color:{self.wallpaper.scheme_color_hex}'>■</span> "
-                f"{self.wallpaper.scheme_color_hex}"
+                f"<b style='color:{_tc}'>主题色:</b> "
+                f"<span style='color:{self.wallpaper.scheme_color_hex}'>■</span> "
+                f"<span style='color:{_ts}'>{self.wallpaper.scheme_color_hex}</span>"
             )
             color_label.setTextFormat(Qt.RichText)
             left_info.addWidget(color_label)
@@ -156,7 +172,7 @@ class PreviewDialog(QDialog):
             # 无多媒体模块时显示占位
             self.video_label = QLabel("🎬 视频预览需要 PySide6-Multimedia\npip install PySide6-Multimedia")
             self.video_label.setAlignment(Qt.AlignCenter)
-            self.video_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 14px;")
+            self.video_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 14px;")
             self.stack.addWidget(self.video_label)  # index 1
             return
 
@@ -208,7 +224,7 @@ class PreviewDialog(QDialog):
                 return
 
         self.image_label.setText("无法加载预览图")
-        self.image_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 16px;")
+        self.image_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 16px;")
 
     def _toggle_play(self):
         """播放/暂停切换"""
