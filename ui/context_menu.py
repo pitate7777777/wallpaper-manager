@@ -14,6 +14,8 @@ class WallpaperContextMenu(QObject):
     open_folder = Signal()          # 打开文件夹
     copy_path = Signal()            # 复制路径
     apply_wallpaper = Signal()      # 应用壁纸（在 WE 中打开）
+    set_as_wallpaper = Signal()     # 设为桌面壁纸（静态图片）
+    set_as_we_wallpaper = Signal()  # 设为 WE 动态壁纸
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,6 +29,17 @@ class WallpaperContextMenu(QObject):
             preview_action = QAction(f"🔍 预览 - {wallpaper.title}", menu)
             preview_action.triggered.connect(self.open_preview.emit)
             menu.addAction(preview_action)
+
+            # 设为桌面壁纸（静态图片类型时显示）
+            if wallpaper.wp_type == "scene":
+                set_wp_action = QAction("🖼️ 设为桌面壁纸", menu)
+                set_wp_action.triggered.connect(self.set_as_wallpaper.emit)
+                menu.addAction(set_wp_action)
+
+            # 设为 WE 动态壁纸
+            set_we_action = QAction("🎬 设为 WE 壁纸", menu)
+            set_we_action.triggered.connect(self.set_as_we_wallpaper.emit)
+            menu.addAction(set_we_action)
 
             apply_action = QAction("🎨 在 Wallpaper Engine 中应用", menu)
             apply_action.triggered.connect(self.apply_wallpaper.emit)

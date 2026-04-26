@@ -15,6 +15,8 @@ from core.scanner import scan_directory
 from core.models import Wallpaper
 from core.thumbnail_worker import ThumbnailWorker, cleanup_thumbs
 from core.export_worker import ExportWorker, ImportWorker
+from core.wallpaper_setter import WallpaperSetter
+from core.rotation_worker import RotationWorker
 from config import load_config, add_wallpaper_dir
 from ui.wallpaper_card import WallpaperCard, CARD_WIDTH
 from ui.filter_bar import FilterBar
@@ -92,7 +94,12 @@ class MainWindow(QMainWindow):
         self._context_menu.open_folder.connect(self._open_folder_from_context)
         self._context_menu.copy_path.connect(self._copy_path_from_context)
         self._context_menu.apply_wallpaper.connect(self._apply_wallpaper_from_context)
+        self._context_menu.set_as_wallpaper.connect(self._on_set_wallpaper)
+        self._context_menu.set_as_we_wallpaper.connect(self._on_set_wallpaper_we)
         self._context_menu_wallpaper_id = None
+
+        # 壁纸轮换
+        self._rotation_worker = None
 
         self._setup_ui()
         self._load_data()
@@ -118,6 +125,7 @@ class MainWindow(QMainWindow):
         self.filter_bar.dir_manager_clicked.connect(self._on_dir_manager)
         self.filter_bar.export_clicked.connect(self._on_export_all)
         self.filter_bar.import_clicked.connect(self._on_import)
+        self.filter_bar.rotation_toggled.connect(self._on_rotation_toggle)
         main_layout.addWidget(self.filter_bar)
 
         # 统计 + 选择状态栏
@@ -638,6 +646,141 @@ class MainWindow(QMainWindow):
             self._cards[wallpaper_id].fav_btn.setText(emoji)
         self._update_stats()
 
+    # ─── 壁纸设置 ─────────────────────────────────────────────
+
+    def _on_set_wallpaper(self):
+        """设为桌面壁纸（静态图片）"""
+        if not self._context_menu_wallpaper_id:
+            return
+        wp = next(
+            (w for w in self._current_wallpapers if w.id == self._context_menu_wallpaper_id),
+            None,
+        )
+        if not wp:
+            return
+
+        # 确认对话框
+        reply = QMessageBox.question(
+            self,
+            "设置壁纸",
+            f"确定要将「{wp.title}」设为桌面壁纸吗？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        image_path = wp.preview_path or wp.wallpaper_file_path
+        if not image_path or not Path(image_path).exists():
+            self.status_bar.showMessage("❌ 壁纸文件不存在", 3000)
+            return
+
+        success = WallpaperSetter.set_wallpaper(image_path)
+        if success:
+            self.status_bar.showMessage(f"✅ 桌面壁纸已设置为「{wp.title}」", 3000)
+        else:
+            self.status_bar.showMessage(f"❌ 设置壁纸失败，请检查文件格式", 5000)
+
+    def _on_set_wallpaper_we(self):
+        """设为 WE 动态壁纸"""
+        if not self._context_menu_wallpaper_id:
+            return
+        wp = next(
+            (w for w in self._current_wallpapers if w.id == self._context_menu_wallpaper_id),
+            None,
+        )
+        if not wp:
+            return
+
+        # 确认对话框
+        reply = QMessageBox.question(
+            self,
+            "设置 WE 壁纸",
+            f"确定要将「{wp.title}」设为 Wallpaper Engine 壁纸吗？\n\n"
+            "注意：需要 Wallpaper Engine 正在运行。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        success = WallpaperSetter.set_wallpaper_we(wp.folder_path)
+        if success:
+            self.status_bar.showMessage(f"✅ WE 壁纸已设置为「{wp.title}」", 3000)
+        else:
+            self.status_bar.showMessage(
+                f"❌ 设置 WE 壁纸失败，请确认 Wallpaper Engine 已安装且正在运行", 5000
+            )
+
+    # ─── 壁纸轮换 ─────────────────────────────────────────────
+
+    def _on_rotation_toggle(self, enabled: bool, interval_minutes: int, mode: str):
+        """切换壁纸轮换状态"""
+        if enabled:
+            self._start_rotation(interval_minutes, mode)
+        else:
+            self._stop_rotation()
+
+    def _start_rotation(self, interval_minutes: int, mode: str):
+        """启动壁纸轮换"""
+        if self._rotation_worker is None:
+            self._rotation_worker = RotationWorker(
+                db_query_func=lambda: db.query_wallpapers(
+                    favorites_only=(mode == "favorite")
+                ),
+                set_wallpaper_func=self._apply_rotation_wallpaper,
+                interval_minutes=interval_minutes,
+                mode=mode,
+                parent=self,
+            )
+            self._rotation_worker.wallpaper_changed.connect(self._on_rotation_wallpaper_changed)
+            self._rotation_worker.rotation_started.connect(self._on_rotation_started)
+            self._rotation_worker.rotation_stopped.connect(self._on_rotation_stopped)
+            self._rotation_worker.error_occurred.connect(self._on_rotation_error)
+
+        self._rotation_worker.start_rotation(interval_minutes, mode)
+
+    def _stop_rotation(self):
+        """停止壁纸轮换"""
+        if self._rotation_worker:
+            self._rotation_worker.cleanup()
+            self._rotation_worker = None
+
+    def _apply_rotation_wallpaper(self, wallpaper):
+        """轮换时应用壁纸（内部方法）"""
+        import sys
+
+        if sys.platform != "win32":
+            logger.warning("壁纸轮换仅支持 Windows")
+            return
+
+        image_path = wallpaper.preview_path or wallpaper.wallpaper_file_path
+        if image_path and Path(image_path).exists():
+            WallpaperSetter.set_wallpaper(image_path)
+        else:
+            # 尝试 WE 方式
+            WallpaperSetter.set_wallpaper_we(wallpaper.folder_path)
+
+    def _on_rotation_wallpaper_changed(self, wp_id: str, title: str):
+        """轮换壁纸变化通知"""
+        self.status_bar.showMessage(f"🔄 壁纸轮换: {title}", 3000)
+
+    def _on_rotation_started(self, interval_minutes: int, mode: str):
+        """轮换启动通知"""
+        mode_names = {"random": "随机", "sequential": "顺序", "favorite": "收藏"}
+        mode_name = mode_names.get(mode, mode)
+        self.status_bar.showMessage(
+            f"🔄 壁纸轮换已启动: 每 {interval_minutes} 分钟 ({mode_name})", 3000
+        )
+
+    def _on_rotation_stopped(self):
+        """轮换停止通知"""
+        self.status_bar.showMessage("🔄 壁纸轮换已停止", 3000)
+
+    def _on_rotation_error(self, message: str):
+        """轮换错误通知"""
+        self.status_bar.showMessage(f"❌ 轮换错误: {message}", 5000)
+
     # ─── 窗口事件 ─────────────────────────────────────────────
 
     def resizeEvent(self, event):
@@ -675,6 +818,11 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         """关闭时清理后台线程"""
+        # 停止壁纸轮换
+        if self._rotation_worker:
+            self._rotation_worker.cleanup()
+            self._rotation_worker = None
+
         workers = [
             (self._thumb_worker, True),   # has cancel()
             (self._scan_worker, False),

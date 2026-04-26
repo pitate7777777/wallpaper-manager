@@ -1,8 +1,9 @@
-"""搜索和过滤栏 - 增加目录管理、导入导出"""
+"""搜索和过滤栏 - 增加目录管理、导入导出、壁纸轮换"""
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLineEdit, QComboBox,
-    QPushButton, QCheckBox,
+    QPushButton, QCheckBox, QSpinBox, QMenu,
 )
+from PySide6.QtGui import QAction
 from PySide6.QtCore import Signal
 
 from ui.theme import COLORS
@@ -20,10 +21,14 @@ class FilterBar(QWidget):
     dir_manager_clicked = Signal()
     export_clicked = Signal()
     import_clicked = Signal()
+    rotation_toggled = Signal(bool, int, str)  # enabled, interval_minutes, mode
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("filterBar")
+        self._rotation_enabled = False
+        self._rotation_interval = 30  # 分钟
+        self._rotation_mode = "random"
         self._setup_ui()
 
     def _setup_ui(self):
@@ -104,6 +109,108 @@ class FilterBar(QWidget):
         self.scan_btn.setObjectName("scanBtn")
         self.scan_btn.clicked.connect(self.scan_clicked.emit)
         layout.addWidget(self.scan_btn)
+
+        # 分隔
+        sep2 = QWidget()
+        sep2.setFixedWidth(1)
+        sep2.setStyleSheet(f"background: {COLORS['separator']};")
+        sep2.setFixedHeight(20)
+        layout.addWidget(sep2)
+
+        # 壁纸轮换按钮
+        self.rotation_btn = QPushButton("🔄 自动轮换")
+        self.rotation_btn.setObjectName("rotationBtn")
+        self.rotation_btn.setToolTip("点击开启/关闭壁纸自动轮换\n右键可设置轮换参数")
+        self.rotation_btn.setCheckable(True)
+        self.rotation_btn.setChecked(False)
+        self.rotation_btn.clicked.connect(self._on_rotation_clicked)
+        self.rotation_btn.setContextMenuPolicy(
+            self.rotation_btn.__class__.__dict__.get(
+                "CustomContextMenu", 2  # Qt.CustomContextMenu
+            )
+        )
+        # 使用自定义右键菜单
+        self.rotation_btn.installEventFilter(self)
+        layout.addWidget(self.rotation_btn)
+
+    def eventFilter(self, obj, event):
+        """处理轮换按钮的右键菜单"""
+        from PySide6.QtCore import Qt, QEvent
+        if obj is self.rotation_btn and event.type() == QEvent.ContextMenu:
+            self._show_rotation_menu(event.globalPos())
+            return True
+        return super().eventFilter(obj, event)
+
+    def _on_rotation_clicked(self):
+        """轮换按钮点击"""
+        self._rotation_enabled = self.rotation_btn.isChecked()
+        self.rotation_toggled.emit(
+            self._rotation_enabled,
+            self._rotation_interval,
+            self._rotation_mode,
+        )
+        self._update_rotation_btn_text()
+
+    def _show_rotation_menu(self, pos):
+        """显示轮换设置菜单"""
+        menu = QMenu(self)
+
+        # 间隔时间
+        interval_menu = menu.addMenu("⏱️ 轮换间隔")
+        for minutes, label in [
+            (5, "5 分钟"),
+            (15, "15 分钟"),
+            (30, "30 分钟"),
+            (60, "1 小时"),
+            (120, "2 小时"),
+        ]:
+            action = QAction(label, interval_menu)
+            action.setCheckable(True)
+            action.setChecked(self._rotation_interval == minutes)
+            action.triggered.connect(lambda checked, m=minutes: self._set_rotation_interval(m))
+            interval_menu.addAction(action)
+
+        menu.addSeparator()
+
+        # 轮换模式
+        mode_menu = menu.addMenu("🎲 轮换模式")
+        for mode, label in [
+            ("random", "🔀 随机"),
+            ("sequential", "📋 顺序"),
+            ("favorite", "❤️ 仅收藏"),
+        ]:
+            action = QAction(label, mode_menu)
+            action.setCheckable(True)
+            action.setChecked(self._rotation_mode == mode)
+            action.triggered.connect(lambda checked, m=mode: self._set_rotation_mode(m))
+            mode_menu.addAction(action)
+
+        menu.exec(pos)
+
+    def _set_rotation_interval(self, minutes: int):
+        """设置轮换间隔"""
+        self._rotation_interval = minutes
+        if self._rotation_enabled:
+            self.rotation_toggled.emit(True, self._rotation_interval, self._rotation_mode)
+        self._update_rotation_btn_text()
+
+    def _set_rotation_mode(self, mode: str):
+        """设置轮换模式"""
+        self._rotation_mode = mode
+        if self._rotation_enabled:
+            self.rotation_toggled.emit(True, self._rotation_interval, self._rotation_mode)
+        self._update_rotation_btn_text()
+
+    def _update_rotation_btn_text(self):
+        """更新轮换按钮文本"""
+        if self._rotation_enabled:
+            mode_names = {"random": "随机", "sequential": "顺序", "favorite": "收藏"}
+            mode_name = mode_names.get(self._rotation_mode, self._rotation_mode)
+            self.rotation_btn.setText(f"🔄 轮换中 ({self._rotation_interval}分/{mode_name})")
+            self.rotation_btn.setChecked(True)
+        else:
+            self.rotation_btn.setText("🔄 自动轮换")
+            self.rotation_btn.setChecked(False)
 
     def update_tags(self, tags: list[str]):
         """更新标签下拉列表"""

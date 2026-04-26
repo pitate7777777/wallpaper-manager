@@ -1,9 +1,9 @@
 # 需求文档 (PRD)
 
 > **项目名称**: Wallpaper Manager
-> **版本**: v0.1.1
+> **版本**: v0.2.0
 > **日期**: 2026-04-26
-> **状态**: Phase 1 完成，Phase 2 PoC 完成
+> **状态**: Phase 2 完成
 
 ---
 
@@ -331,19 +331,19 @@ Wallpaper Engine 是 Steam 平台上的动态壁纸工具，用户通过 Worksho
 | 单元测试 | ✅ 完成 | 88 个测试用例 |
 | PyInstaller 打包 | ✅ 完成 | |
 
-### Phase 2 — 壁纸设置
+### Phase 2 — 壁纸设置 ✅ 完成
 
 | 功能 | 说明 | 状态 |
 |------|------|------|
 | WE 协议调研 | 确认无公开 API，PoC 已完成 | ✅ 完成 |
-| WE 控制器 PoC | `core/we_controller.py`（464 行，20 测试） | ✅ 完成 |
-| 右键"应用壁纸" | 启动 WE + 打开壁纸文件夹 | ✅ 完成 |
-| 一键设置壁纸 | 通过 Windows API 设置静态壁纸 | 📋 待开发 |
-| WE 配置文件方式 | 修改 WE 配置切换动态壁纸 | 📋 待开发 |
-| 定时轮换 | 按时间间隔/随机/顺序自动切换壁纸 | 📋 待开发 |
+| 一键设置壁纸 | `wallpaper_setter.py` — Windows API `SystemParametersInfoW` | ✅ 完成 |
+| WE 壁纸设置 | 命令行 + 配置文件方式，自动检测 WE 安装路径 | ✅ 完成 |
+| 定时轮换 | `rotation_worker.py` — 随机/顺序/收藏模式 | ✅ 完成 |
+| 右键菜单集成 | "设为桌面壁纸" + "设为 WE 壁纸" | ✅ 完成 |
+| 轮换控制 UI | FilterBar 轮换按钮 + 间隔/模式设置 | ✅ 完成 |
 
 > ⚠️ **WE WebSocket 方案已废弃**：经调研确认 Wallpaper Engine 没有公开的 WebSocket
-> 控制 API（端口 7884 为社区猜测）。Phase 2 将改用 Windows API + 配置文件修改的路线。
+> 控制 API（端口 7884 为社区猜测）。Phase 2 改用 Windows API + 配置文件路线。
 > 详见 `core/we_controller.py` 中的调研记录。
 
 ### Phase 3 — 高级功能
@@ -465,16 +465,26 @@ wallpaper-manager/
 - 视频壁纸预览
 - PyInstaller 打包
 
-### v0.2.0 (2026-04-26) — WE 控制器 PoC
+### v0.2.0 (2026-04-26) — Phase 2 壁纸设置
 
 **新增：**
-- `core/we_controller.py` — Wallpaper Engine WebSocket 控制器 PoC（464 行）
-  - 调研结论记录在模块 docstring：WE 无公开 WebSocket API
-  - 异步 WebSocket 连接（多端点探测）
-  - 从 Steam Workshop 目录读取壁纸列表（备用方案）
-  - `explore_we_protocol()` 协议探索工具
-- `tests/test_we_controller.py` — 20 个单元测试
-- 右键菜单新增"🎨 在 Wallpaper Engine 中应用"功能
+- `core/wallpaper_setter.py` — 壁纸设置模块（514 行）
+  - `set_wallpaper()` — 通过 Windows API `SystemParametersInfoW` 设置桌面壁纸
+  - `get_current_wallpaper()` — 获取当前壁纸路径
+  - `set_wallpaper_we()` — 通过命令行或配置文件设置 WE 动态壁纸
+  - `find_we_install()` — 自动检测 WE 安装路径（Steam 库 + 注册表）
+  - `get_we_wallpaper_list()` — 列出所有 WE 壁纸
+- `core/rotation_worker.py` — 壁纸定时轮换（200 行）
+  - 三种模式：随机 / 顺序 / 收藏
+  - 可选间隔：5/15/30/60/120 分钟
+  - 信号：`wallpaper_changed` / `rotation_started` / `rotation_stopped`
+- `tests/test_wallpaper_setter.py` — 13 个单元测试
+- `tests/test_rotation_worker.py` — 12 个单元测试
+
+**UI 集成：**
+- 右键菜单新增"🖼️ 设为桌面壁纸"和"🎬 设为 WE 壁纸"
+- FilterBar 新增"🔄 自动轮换"按钮 + 右键设置（间隔/模式）
+- 主窗口集成轮换生命周期管理
 
 **依赖：**
 - `requirements.txt` 新增 `websockets>=12.0`
