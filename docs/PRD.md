@@ -1,9 +1,9 @@
 # 需求文档 (PRD)
 
 > **项目名称**: Wallpaper Manager
-> **版本**: v0.2.0
+> **版本**: v0.3.0
 > **日期**: 2026-04-26
-> **状态**: Phase 2 完成，v0.2.0 已发布
+> **状态**: Phase 3 完成
 
 ---
 
@@ -346,14 +346,16 @@ Wallpaper Engine 是 Steam 平台上的动态壁纸工具，用户通过 Worksho
 > 控制 API（端口 7884 为社区猜测）。Phase 2 改用 Windows API + 配置文件路线。
 > 详见 `core/we_controller.py` 中的调研记录。
 
-### Phase 3 — 高级功能
+### Phase 3 — 高级功能 ✅ 大部分完成
 
-| 功能 | 说明 |
-|------|------|
-| 多主题支持 | 亮色主题、自定义主题（theme.py 已预留接口） |
-| 缩略图尺寸选择 | 小/中/大卡片（config 中已有 thumb_size） |
-| 标签管理 | 标签重命名、合并、删除 |
-| 云端同步 | 收藏列表云同步（可选） |
+| 功能 | 说明 | 状态 |
+|------|------|------|
+| 多主题支持 | 暗色/亮色主题一键切换 | ✅ 完成 |
+| 缩略图尺寸选择 | 小/中/大卡片 | ✅ 完成 |
+| 标签管理 | 标签重命名、合并、删除 | ✅ 完成 |
+| PyInstaller 打包自动化 | 跨平台打包脚本 + 进度显示 | ✅ 完成 |
+| 高级搜索 | 正则/精确搜索 + 多标签组合 + 排除标签 | ✅ 完成 |
+| 云端同步 | 收藏列表云同步 | 📋 待定 |
 
 ---
 
@@ -488,3 +490,35 @@ wallpaper-manager/
 
 **依赖：**
 - `requirements.txt` 新增 `websockets>=12.0`
+
+### v0.3.0 (2026-04-26) — Phase 3 高级功能
+
+**新增：**
+- `ui/theme.py` — 多主题支持
+  - `LIGHT_THEME` 亮色主题色板
+  - `THEMES` 主题注册表 + `set_theme()` / `get_current_theme_name()`
+  - FilterBar 主题切换按钮（🌙/☀️）
+- `ui/wallpaper_card.py` — 缩略图尺寸选择
+  - `CARD_SIZES`: small(160×120) / medium(220×160) / large(320×240)
+  - FilterBar 尺寸下拉框
+- `core/tag_manager.py` — 标签管理
+  - `rename_tag()` / `merge_tags()` / `delete_tag()` / `get_tag_stats()`
+  - `ui/tag_manager_dialog.py` 管理对话框
+  - 33 个单元测试
+- `core/db.py` — 高级搜索
+  - `search_mode`: simple / regex / exact
+  - `tags_mode`: any / all
+  - `exclude_tags`: 排除标签
+  - `update_wallpaper_tags()` / `get_tag_stats()`
+- `scripts/build.py` — 跨平台打包脚本
+  - clean → build → verify 流程
+  - 支持 `--clean-only`, `--no-open` 参数
+- `tests/test_advanced_search.py` — 27 个高级搜索测试
+- `tests/test_tag_manager.py` — 33 个标签管理测试
+
+**改进：**
+- `build.spec` — 包含所有新模块 + 数据文件
+- `build.bat` — 自动检测 Python + 进度显示 + 自动打开输出目录
+- `config.py` — 新增 `card_size` 和 `theme` 配置项
+
+**测试：** 186 passed, 12 skipped

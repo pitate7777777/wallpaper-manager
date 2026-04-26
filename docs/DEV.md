@@ -20,8 +20,9 @@
 │  │多目录管理  │ │批量操作    │     │                  │
 │  └───────────┘ └───────────┘     │                  │
 │  ┌──────────────────────────────────────┐           │
-│  │ theme.py — 颜色常量 + QSS 生成        │           │
-│  │ COLORS dict + generate_stylesheet()  │           │
+│  │ theme.py — 多主题系统 + QSS 生成       │           │
+│  │ THEMES + set_theme() + COLORS dict   │           │
+│  │ DARK_THEME / LIGHT_THEME             │           │
 │  └──────────────────────────────────────┘           │
 ├──────────────────────────────────────────────────────┤
 │                  Core 业务层 (core/)                   │
@@ -257,21 +258,53 @@ class RotationWorker(QObject):
 
 ## 主题系统 (ui/theme.py)
 
-所有颜色集中在 `COLORS` 字典中，QSS 通过 `generate_stylesheet()` 函数生成：
+支持多主题切换。所有颜色集中在主题字典中，QSS 通过 `generate_stylesheet()` 函数生成：
 
 ```python
-from ui.theme import COLORS, generate_stylesheet
+from ui.theme import COLORS, generate_stylesheet, set_theme, THEMES
 
-# 使用颜色常量
-label.setStyleSheet(f"color: {COLORS['text_muted']};")
+# 切换主题（原地更新 COLORS，所有 import 引用自动生效）
+set_theme("light")   # 切到亮色
+set_theme("dark")    # 切回暗色
 
-# 生成完整样式表（支持自定义颜色字典，为多主题预留）
-app.setStyleSheet(generate_stylesheet())
+# 生成完整样式表
+app.setStyleSheet(generate_stylesheet())           # 当前主题
+app.setStyleSheet(generate_stylesheet("light"))    # 指定主题
+
+# 查看可用主题
+get_theme_names()  # ["dark", "light"]
+
+# 注册自定义主题
+register_theme("ocean", { ... })
 ```
 
-颜色分类：
-- **bg_***: 背景色（main, panel, input, preview, info, selected, hover）
-- **border_***: 边框色（default, focus, selected, button）
+### 内置主题
+
+| 主题 | 说明 |
+|------|------|
+| `dark` | 暗色主题（默认），深蓝背景 + 浅色文字 |
+| `light` | 亮色主题，浅灰背景 + 深色文字 |
+
+### 主题切换机制
+
+1. **启动时**：`app.py` 从 `config.json` 读取 `theme` 字段，调用 `set_theme()` 初始化
+2. **运行时**：FilterBar 主题按钮（🌙/☀️）触发 `theme_changed` 信号
+3. **MainWindow** 接收信号 → `set_theme()` → `generate_stylesheet()` → `app.setStyleSheet()`
+4. **持久化**：保存到 `config.json`，下次启动自动应用
+
+### `set_theme()` 原地更新策略
+
+`COLORS` 是模块级字典。`set_theme()` 使用 `COLORS.clear()` + `COLORS.update()` 而非重新赋值，
+确保通过 `from ui.theme import COLORS` 导入的引用不会失效。
+
+### 主题键一致性校验
+
+模块加载时自动验证所有注册主题的键集合与 `DARK_THEME` 一致，缺失或多余的键会抛出 `ValueError`。
+
+### 颜色分类
+
+- **bg_***: 背景色（main, panel, input, preview, info, selected, hover, dropdown）
+- **border_***: 边框色（default, focus, selected, selected_hover, button）
 - **text_***: 文本色（primary, secondary, muted, dim, placeholder）
 - **btn_***: 按钮色（bg, hover, pressed, scan, clear）
 - **selection_***: 选择色
@@ -281,7 +314,9 @@ app.setStyleSheet(generate_stylesheet())
 
 ### WallpaperCard
 
-- 固定尺寸：236×232（含外边距）
+- 可调尺寸：small(160×120) / medium(220×160) / large(320×240)
+- 尺寸通过 `CARD_SIZES` 字典预设，`get_card_dimensions(size)` 查询
+- `__init__` 接受 `size` 参数，默认 `"medium"`
 - 支持选中状态（蓝色边框高亮）
 - 信号：`clicked`, `ctrl_clicked`, `shift_clicked`, `favorite_toggled`, `context_menu_requested`
 - 优先加载缩略图缓存，回退到原始预览图
@@ -289,10 +324,15 @@ app.setStyleSheet(generate_stylesheet())
 
 ### FilterBar
 
-- 搜索框（防抖 300ms）
-- 类型/标签/排序下拉
+- 搜索框（防抖 300ms）+ 搜索模式切换（简单/正则/精确）
+- 类型/排序下拉
+- 标签多选弹出面板 + 排除标签
 - 收藏过滤复选框
 - 📤导出 / 📥导入 / 📂目录 / 🔄扫描 按钮
+- 🔄 自动轮换按钮（右键设置间隔和模式）
+- 📐 卡片尺寸下拉（小/中/大），触发 `card_size_changed` 信号
+- 🌙/☀️ 主题切换按钮，触发 `theme_changed` 信号
+- 🏷️ 标签管理按钮
 
 ### PreviewDialog
 
@@ -335,7 +375,9 @@ app.setStyleSheet(generate_stylesheet())
 
 ## 样式主题
 
-所有颜色定义在 `ui/theme.py` 的 `COLORS` 字典中。当前主题色板：
+颜色定义在 `ui/theme.py` 的主题字典中。内置 `DARK_THEME`（暗色）和 `LIGHT_THEME`（亮色），通过 `THEMES` 字典注册。
+
+暗色主题色板：
 
 | 元素 | 色值 | 键名 |
 |------|------|------|
@@ -351,21 +393,40 @@ app.setStyleSheet(generate_stylesheet())
 | 次要文字 | `#c0c0c0` | `text_secondary` |
 | 弱化文字 | `#888` | `text_muted` |
 
+亮色主题色板：
+
+| 元素 | 色值 | 键名 |
+|------|------|------|
+| 主背景 | `#f5f5f7` | `bg_main` |
+| 面板背景 | `#ffffff` | `bg_panel` |
+| 输入框背景 | `#e8e8ed` | `bg_input` |
+| 边框 | `#c8c8d0` | `border` |
+| 悬停边框 | `#8888b0` | `border_focus` |
+| 选中边框 | `#4a7aff` | `border_selected` |
+| 按钮背景 | `#e0e0e8` | `btn_bg` |
+| 强调按钮 | `#4a7aff` | `btn_scan_bg` |
+| 主文字 | `#1a1a2e` | `text_primary` |
+| 次要文字 | `#3a3a50` | `text_secondary` |
+| 弱化文字 | `#888898` | `text_muted` |
+
 ## 测试
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-当前 101 个测试用例（12 skipped）：
+当前 186 个测试用例（12 skipped）：
 
 | 文件 | 用例数 | 覆盖范围 |
 |------|--------|----------|
-| `test_models.py` | 26 | Wallpaper 数据类属性、边界值、默认值 |
-| `test_db.py` | 25 | CRUD、查询过滤、排序、标签去重、统计 |
-| `test_scanner.py` | 17 | project.json 解析、畸形数据容错、Unicode |
+| `test_db.py` | 35 | CRUD、查询过滤、排序、标签去重、统计 |
+| `test_tag_manager.py` | 33 | 标签管理、重命名、合并、删除 |
+| `test_models.py` | 27 | Wallpaper 数据类属性、边界值、默认值 |
+| `test_advanced_search.py` | 27 | 高级搜索、正则、精确匹配、排除标签 |
 | `test_we_controller.py` | 20 | 初始化、连接、命令、同步包装器、探索函数 |
-| `test_wallpaper_setter.py` | 13 | 平台检测、VDF 解析、常量验证 |
+| `test_scanner.py` | 16 | project.json 解析、畸形数据容错、Unicode |
+| `test_wallpaper_setter.py` | 15 | 平台检测、VDF 解析、常量验证 |
+| `test_theme.py` | 13 | 主题切换、键一致性、样式表生成 |
 | `test_rotation_worker.py` | 12 (12 skip) | 初始化、pick_next、刷新、生命周期（需 PySide6） |
 
 测试策略：
@@ -395,6 +456,18 @@ pip install PySide6-Multimedia
 4. **单线程扫描** — 多目录顺序扫描，大库可能较慢
 
 ## 变更日志
+
+### v0.3.0 (2026-04-26)
+
+- 新增多主题支持：`DARK_THEME` + `LIGHT_THEME`，`THEMES` 注册表，`set_theme()` 原地更新
+- `generate_stylesheet()` 新增 `theme_name` 参数（向后兼容 `colors` 参数）
+- `app.py` 启动时从 config 读取主题并应用
+- `FilterBar` 新增主题切换按钮（🌙/☀️）和卡片尺寸下拉（小/中/大）
+- `WallpaperCard` 支持动态尺寸：`CARD_SIZES` 预设 + `size` 参数
+- `MainWindow` 主题切换保存 config + 刷新样式表，尺寸切换重建网格
+- `theme.py` 模块加载时自动校验主题键一致性
+- `config.py` 默认配置新增 `card_size` 和 `theme` 字段
+- 全部 186 个测试通过（12 skipped）
 
 ### v0.2.0 (2026-04-26)
 

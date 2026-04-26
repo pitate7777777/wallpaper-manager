@@ -312,6 +312,19 @@ THEMES: dict[str, dict[str, str]] = {
     "light": LIGHT_THEME,
 }
 
+# 主题键一致性校验（模块加载时执行一次）
+_expected_keys = set(DARK_THEME.keys())
+for _tname, _tcolors in THEMES.items():
+    _actual = set(_tcolors.keys())
+    if _actual != _expected_keys:
+        _missing = _expected_keys - _actual
+        _extra = _actual - _expected_keys
+        raise ValueError(
+            f"主题 '{_tname}' 键与 DARK_THEME 不一致"
+            + (f"，缺失: {_missing}" if _missing else "")
+            + (f"，多余: {_extra}" if _extra else "")
+        )
+
 # 当前活跃主题（模块级可变状态）
 _current_theme_name = "dark"
 COLORS = dict(DARK_THEME)

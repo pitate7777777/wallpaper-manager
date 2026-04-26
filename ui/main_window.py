@@ -20,7 +20,7 @@ from core.export_worker import ExportWorker, ImportWorker
 from core.wallpaper_setter import WallpaperSetter
 from core.rotation_worker import RotationWorker
 from config import load_config, save_config, add_wallpaper_dir
-from ui.wallpaper_card import WallpaperCard, CARD_WIDTH, get_card_dimensions, CARD_SIZES
+from ui.wallpaper_card import WallpaperCard, get_card_dimensions
 from ui.filter_bar import FilterBar
 from ui.preview_dialog import PreviewDialog
 from ui.dir_manager_dialog import DirManagerDialog
@@ -663,7 +663,6 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self, theme_name: str):
         """应用主题样式表"""
-        from ui.theme import set_theme, generate_stylesheet
         try:
             set_theme(theme_name)
         except KeyError:
