@@ -105,14 +105,12 @@ class TagManagerDialog(QDialog):
     def _load_tags(self):
         """加载所有标签"""
         self.tag_list.clear()
-        tags = db.get_all_tags()
-        for tag in tags:
-            # 查询使用此标签的壁纸数量
-            wallpapers = db.query_wallpapers(tags=[tag])
-            item = QListWidgetItem(f"{tag}  ({len(wallpapers)} 张)")
-            item.setData(Qt.UserRole, tag)
+        stats = db.get_tag_stats()
+        for s in stats:
+            item = QListWidgetItem(f"{s['name']}  ({s['count']} 张)")
+            item.setData(Qt.UserRole, s["name"])
             self.tag_list.addItem(item)
-        self.stats_label.setText(f"共 {len(tags)} 个标签")
+        self.stats_label.setText(f"共 {len(stats)} 个标签")
 
     def _get_selected_tags(self) -> list[str]:
         """获取选中的标签名列表"""

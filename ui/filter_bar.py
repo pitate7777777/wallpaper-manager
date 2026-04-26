@@ -1,8 +1,7 @@
 """搜索和过滤栏 - 增加目录管理、导入导出、壁纸轮换、主题切换、卡片尺寸、高级搜索"""
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLineEdit, QComboBox,
-    QPushButton, QCheckBox, QMenu, QListWidget, QListWidgetItem,
-    QAbstractItemView, QSizePolicy, QToolButton,
+    QPushButton, QCheckBox, QMenu, QToolButton,
 )
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Signal, QEvent, Qt
