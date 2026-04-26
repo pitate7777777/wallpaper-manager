@@ -1,5 +1,7 @@
 """主窗口 - 多选/右键菜单/多目录/缩略图/导入导出"""
 import logging
+import subprocess
+import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -93,7 +95,6 @@ class MainWindow(QMainWindow):
         self._context_menu.open_preview.connect(self._open_preview_from_context)
         self._context_menu.open_folder.connect(self._open_folder_from_context)
         self._context_menu.copy_path.connect(self._copy_path_from_context)
-        self._context_menu.apply_wallpaper.connect(self._apply_wallpaper_from_context)
         self._context_menu.set_as_wallpaper.connect(self._on_set_wallpaper)
         self._context_menu.set_as_we_wallpaper.connect(self._on_set_wallpaper_we)
         self._context_menu_wallpaper_id = None
@@ -357,7 +358,6 @@ class MainWindow(QMainWindow):
         if self._context_menu_wallpaper_id:
             wp = next((w for w in self._current_wallpapers if w.id == self._context_menu_wallpaper_id), None)
             if wp:
-                import subprocess
                 if Path(wp.folder_path).exists():
                     subprocess.Popen(["explorer", wp.folder_path])
 
@@ -367,61 +367,6 @@ class MainWindow(QMainWindow):
             if wp:
                 QApplication.clipboard().setText(wp.folder_path)
                 self.status_bar.showMessage("📋 路径已复制到剪贴板", 2000)
-
-    def _apply_wallpaper_from_context(self):
-        """在 Wallpaper Engine 中打开/应用选中的壁纸"""
-        if not self._context_menu_wallpaper_id:
-            return
-        wp = next((w for w in self._current_wallpapers if w.id == self._context_menu_wallpaper_id), None)
-        if not wp:
-            return
-
-        import subprocess
-        import sys
-
-        folder = wp.folder_path
-        if not Path(folder).exists():
-            self.status_bar.showMessage("❌ 壁纸文件夹不存在", 3000)
-            return
-
-        if sys.platform != "win32":
-            self.status_bar.showMessage("⚠️ 应用壁纸仅支持 Windows 系统", 3000)
-            return
-
-        # 策略 1: 使用 WE 命令行（如果支持）
-        # 策略 2: 直接用资源管理器打开文件夹，用户手动应用
-        # 策略 3: 通过 WE 的配置文件写入壁纸路径（需要 WE 重启）
-        #
-        # 最可靠的方式：打开 WE 应用程序 + 壁纸文件夹
-        # WE 支持 -control play/pause 等参数，但没有公开的"设置壁纸"命令
-        try:
-            # 尝试启动 Wallpaper Engine（如果已安装）
-            we_paths = [
-                Path("C:/Program Files (x86)/Steam/steamapps/common/wallpaper_engine/wallpaper64.exe"),
-                Path("C:/Program Files/Steam/steamapps/common/wallpaper_engine/wallpaper64.exe"),
-                Path("D:/SteamLibrary/steamapps/common/wallpaper_engine/wallpaper64.exe"),
-            ]
-            we_exe = None
-            for p in we_paths:
-                if p.exists():
-                    we_exe = p
-                    break
-
-            if we_exe:
-                subprocess.Popen([str(we_exe)])
-                self.status_bar.showMessage(
-                    f"🎨 Wallpaper Engine 已启动 — 请在 WE 中手动选择「{wp.title}」", 5000
-                )
-            else:
-                self.status_bar.showMessage(
-                    f"🎨 未找到 Wallpaper Engine，请手动打开并选择「{wp.title}」", 5000
-                )
-
-            # 同时打开壁纸文件夹，方便用户在 WE 中定位
-            subprocess.Popen(["explorer", folder])
-
-        except Exception as e:
-            self.status_bar.showMessage(f"❌ 启动失败: {e}", 5000)
 
     # ─── 批量操作 ─────────────────────────────────────────────
 
@@ -748,8 +693,6 @@ class MainWindow(QMainWindow):
 
     def _apply_rotation_wallpaper(self, wallpaper):
         """轮换时应用壁纸（内部方法）"""
-        import sys
-
         if sys.platform != "win32":
             logger.warning("壁纸轮换仅支持 Windows")
             return

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import platform
+import re
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -23,7 +24,6 @@ IS_WINDOWS = platform.system() == "Windows"
 # Windows-only imports
 if IS_WINDOWS:
     import ctypes
-    import ctypes.wintypes
     import winreg
 
 
@@ -49,8 +49,18 @@ class WallpaperSetter:
         Path("E:/SteamLibrary"),
     ]
 
+    # 壁纸样式映射 (名称 → WallpaperStyle 注册表值)
+    WALLPAPER_STYLES = {
+        "center": "0",      # 居中
+        "tile": "0",        # 平铺（需要 TileWallpaper=1）
+        "stretch": "2",     # 拉伸
+        "fit": "6",         # 适应
+        "fill": "10",       # 填充
+        "span": "22",       # 跨越（多显示器）
+    }
+
     @staticmethod
-    def set_wallpaper(image_path: str) -> bool:
+    def set_wallpaper(image_path: str, style: str = "stretch") -> bool:
         """通过 Windows API 设置桌面壁纸
 
         支持 JPG、PNG、BMP 等格式。
@@ -58,6 +68,7 @@ class WallpaperSetter:
 
         Args:
             image_path: 图片文件的绝对路径
+            style: 壁纸样式 - "center" / "tile" / "stretch" / "fit" / "fill" / "span"
 
         Returns:
             是否设置成功
@@ -77,6 +88,10 @@ class WallpaperSetter:
             logger.warning(f"不支持的图片格式: {path.suffix}")
             return False
 
+        # 解析壁纸样式
+        style_val = WallpaperSetter.WALLPAPER_STYLES.get(style, "2")
+        is_tile = "1" if style == "tile" else "0"
+
         try:
             abs_path = str(path.resolve())
 
@@ -88,9 +103,8 @@ class WallpaperSetter:
                 winreg.KEY_SET_VALUE,
             )
             winreg.SetValueEx(key, "Wallpaper", 0, winreg.REG_SZ, abs_path)
-            # 设置壁纸样式：2 = 拉伸, 0 = 居中, 6 = 适应, 10 = 填充
-            winreg.SetValueEx(key, "WallpaperStyle", 0, winreg.REG_SZ, "2")
-            winreg.SetValueEx(key, "TileWallpaper", 0, winreg.REG_SZ, "0")
+            winreg.SetValueEx(key, "WallpaperStyle", 0, winreg.REG_SZ, style_val)
+            winreg.SetValueEx(key, "TileWallpaper", 0, winreg.REG_SZ, is_tile)
             winreg.CloseKey(key)
 
             # 调用 SystemParametersInfoW 使设置生效
@@ -102,7 +116,7 @@ class WallpaperSetter:
             )
 
             if result:
-                logger.info(f"壁纸设置成功: {abs_path}")
+                logger.info(f"壁纸设置成功: {abs_path} (style={style})")
                 return True
             else:
                 error = ctypes.get_last_error()
@@ -344,25 +358,26 @@ class WallpaperSetter:
                 logger.info(f"找到 WE 安装路径: {we_path}")
                 return we_path
 
-        # 方式 2: 从注册表查找 Steam 路径
-        try:
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Valve\Steam",
-                0,
-                winreg.KEY_READ,
-            )
-            steam_path_str, _ = winreg.QueryValueEx(key, "SteamPath")
-            winreg.CloseKey(key)
+        # 方式 2: 从注册表查找 Steam 路径（仅 Windows）
+        if IS_WINDOWS:
+            try:
+                key = winreg.OpenKey(
+                    winreg.HKEY_CURRENT_USER,
+                    r"Software\Valve\Steam",
+                    0,
+                    winreg.KEY_READ,
+                )
+                steam_path_str, _ = winreg.QueryValueEx(key, "SteamPath")
+                winreg.CloseKey(key)
 
-            if steam_path_str:
-                steam_path = Path(steam_path_str)
-                we_path = steam_path / "steamapps" / "common" / "wallpaper_engine"
-                if we_path.exists() and (we_path / "wallpaper64.exe").exists():
-                    logger.info(f"从注册表找到 WE: {we_path}")
-                    return we_path
-        except Exception:
-            pass
+                if steam_path_str:
+                    steam_path = Path(steam_path_str)
+                    we_path = steam_path / "steamapps" / "common" / "wallpaper_engine"
+                    if we_path.exists() and (we_path / "wallpaper64.exe").exists():
+                        logger.info(f"从注册表找到 WE: {we_path}")
+                        return we_path
+            except Exception:
+                pass
 
         # 方式 3: 常见路径暴力搜索
         common_we_paths = [
@@ -391,22 +406,22 @@ class WallpaperSetter:
             Steam 库路径列表
         """
         libraries = []
+        vdf_parsed = False
 
-        # 默认 Steam 路径
         for steam_path in WallpaperSetter.STEAM_PATHS:
             if steam_path.exists():
-                libraries.append(steam_path)
-                break
-
-        # 从 libraryfolders.vdf 解析额外库
-        for steam_path in WallpaperSetter.STEAM_PATHS:
-            vdf_path = steam_path / "steamapps" / "libraryfolders.vdf"
-            if vdf_path.exists():
-                try:
-                    libraries.extend(WallpaperSetter._parse_libraryfolders_vdf(vdf_path))
-                except Exception as e:
-                    logger.debug(f"解析 libraryfolders.vdf 失败: {e}")
-                break
+                # 添加默认路径
+                if steam_path not in libraries:
+                    libraries.append(steam_path)
+                # 解析 VDF（只做一次）
+                if not vdf_parsed:
+                    vdf_path = steam_path / "steamapps" / "libraryfolders.vdf"
+                    if vdf_path.exists():
+                        try:
+                            libraries.extend(WallpaperSetter._parse_libraryfolders_vdf(vdf_path))
+                        except Exception as e:
+                            logger.debug(f"解析 libraryfolders.vdf 失败: {e}")
+                        vdf_parsed = True
 
         # 去重
         seen = set()
@@ -438,7 +453,6 @@ class WallpaperSetter:
                 content = f.read()
 
             # 简单的正则提取 "path"  "X:\\..."
-            import re
             paths = re.findall(r'"path"\s+"([^"]+)"', content)
             for p in paths:
                 # VDF 中的路径使用 \\\\ 双转义

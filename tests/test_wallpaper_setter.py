@@ -23,6 +23,20 @@ class TestConstants:
     def test_steam_paths_not_empty(self):
         assert len(WallpaperSetter.STEAM_PATHS) > 0
 
+    def test_wallpaper_styles(self):
+        """壁纸样式映射完整性"""
+        styles = WallpaperSetter.WALLPAPER_STYLES
+        assert "center" in styles
+        assert "stretch" in styles
+        assert "fit" in styles
+        assert "fill" in styles
+        assert "tile" in styles
+        assert "span" in styles
+        # stretch 和 span 使用不同值
+        assert styles["stretch"] != styles["span"]
+        # center 和 tile 的 WallpaperStyle 相同（区别在 TileWallpaper）
+        assert styles["center"] == styles["tile"]
+
 
 class TestSetWallpaper:
     """set_wallpaper 测试"""
@@ -31,6 +45,12 @@ class TestSetWallpaper:
         """非 Windows 平台应返回 False"""
         with patch("core.wallpaper_setter.IS_WINDOWS", False):
             result = WallpaperSetter.set_wallpaper("/some/image.jpg")
+            assert result is False
+
+    def test_returns_false_on_non_windows_with_style(self):
+        """非 Windows 平台带 style 参数应返回 False"""
+        with patch("core.wallpaper_setter.IS_WINDOWS", False):
+            result = WallpaperSetter.set_wallpaper("/some/image.jpg", style="fill")
             assert result is False
 
     @pytest.mark.skipif(IS_WINDOWS, reason="Windows-only test")

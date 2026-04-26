@@ -10,15 +10,16 @@ import logging
 import random
 from typing import Callable, Optional
 
-from PySide6.QtCore import QThread, Signal, QTimer
+from PySide6.QtCore import QObject, Signal, QTimer
 
 logger = logging.getLogger(__name__)
 
 
-class RotationWorker(QThread):
-    """壁纸轮换后台线程
+class RotationWorker(QObject):
+    """壁纸轮换控制器
 
-    使用 QTimer 在主线程中触发轮换，通过信号通知 UI 更新。
+    使用 QTimer 在主线程中定时触发轮换，通过信号通知 UI 更新。
+    继承 QObject（而非 QThread），因为轮换逻辑不需要独立线程。
     """
 
     wallpaper_changed = Signal(str, str)  # wallpaper_id, title

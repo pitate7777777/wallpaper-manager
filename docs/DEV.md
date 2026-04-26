@@ -205,6 +205,56 @@ class WallpaperEngineController:
 > 尝试连接多个可能的端点。生产环境建议使用 Windows API (`SystemParametersInfo`)
 > 或修改 WE 配置文件的方式。
 
+### wallpaper_setter.py
+
+```python
+class WallpaperSetter:
+    @staticmethod
+    def set_wallpaper(image_path: str) -> bool
+    # 通过 Windows API SystemParametersInfoW 设置桌面壁纸
+    # 支持 JPG/PNG/BMP/GIF/TIFF/WebP
+
+    @staticmethod
+    def get_current_wallpaper() -> Optional[str]
+    # 获取当前桌面壁纸路径（注册表 + API）
+
+    @staticmethod
+    def set_wallpaper_we(wallpaper_path: str, we_exe_path=None) -> bool
+    # 通过 WE 命令行或配置文件设置动态壁纸
+
+    @staticmethod
+    def find_we_install() -> Optional[Path]
+    # 自动检测 WE 安装路径（Steam 库 + 注册表 + 常见路径）
+
+    @staticmethod
+    def get_we_wallpaper_list() -> list[dict]
+    # 列出所有 WE 壁纸（Steam Workshop + 本地项目）
+```
+
+- Windows-only 操作通过 `IS_WINDOWS` 平台检测守卫
+- WE 安装检测：解析 Steam `libraryfolders.vdf` + 注册表 + 常见路径
+- 壁纸设置：先注册表写入路径，再 `SystemParametersInfoW` 生效
+
+### rotation_worker.py
+
+```python
+class RotationWorker(QObject):
+    wallpaper_changed = Signal(str, str)  # wallpaper_id, title
+    rotation_started = Signal(int, str)   # interval_minutes, mode
+    rotation_stopped = Signal()
+    error_occurred = Signal(str)
+
+    def start_rotation(interval_minutes, mode)
+    def stop_rotation()
+    def next_wallpaper()
+    def cleanup()
+```
+
+- 使用 `QTimer`（非 QThread），不阻塞 UI
+- 三种模式：`random`（随机）/ `sequential`（顺序）/ `favorite`（仅收藏）
+- 可选间隔：5/15/30/60/120 分钟
+- 壁纸列表在每次轮换时动态刷新（支持运行中收藏变化）
+
 ## 主题系统 (ui/theme.py)
 
 所有颜色集中在 `COLORS` 字典中，QSS 通过 `generate_stylesheet()` 函数生成：
@@ -307,7 +357,7 @@ app.setStyleSheet(generate_stylesheet())
 python -m pytest tests/ -v
 ```
 
-当前 88 个测试用例：
+当前 101 个测试用例（12 skipped）：
 
 | 文件 | 用例数 | 覆盖范围 |
 |------|--------|----------|
@@ -315,6 +365,8 @@ python -m pytest tests/ -v
 | `test_db.py` | 25 | CRUD、查询过滤、排序、标签去重、统计 |
 | `test_scanner.py` | 17 | project.json 解析、畸形数据容错、Unicode |
 | `test_we_controller.py` | 20 | 初始化、连接、命令、同步包装器、探索函数 |
+| `test_wallpaper_setter.py` | 13 | 平台检测、VDF 解析、常量验证 |
+| `test_rotation_worker.py` | 12 (12 skip) | 初始化、pick_next、刷新、生命周期（需 PySide6） |
 
 测试策略：
 - db 测试通过 `monkeypatch` 重定向到临时数据库，不污染真实数据

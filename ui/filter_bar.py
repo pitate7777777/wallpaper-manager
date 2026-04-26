@@ -1,10 +1,10 @@
 """搜索和过滤栏 - 增加目录管理、导入导出、壁纸轮换"""
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLineEdit, QComboBox,
-    QPushButton, QCheckBox, QSpinBox, QMenu,
+    QPushButton, QCheckBox, QMenu,
 )
 from PySide6.QtGui import QAction
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QEvent
 
 from ui.theme import COLORS
 
@@ -124,18 +124,12 @@ class FilterBar(QWidget):
         self.rotation_btn.setCheckable(True)
         self.rotation_btn.setChecked(False)
         self.rotation_btn.clicked.connect(self._on_rotation_clicked)
-        self.rotation_btn.setContextMenuPolicy(
-            self.rotation_btn.__class__.__dict__.get(
-                "CustomContextMenu", 2  # Qt.CustomContextMenu
-            )
-        )
-        # 使用自定义右键菜单
+        # 通过 eventFilter 拦截右键菜单
         self.rotation_btn.installEventFilter(self)
         layout.addWidget(self.rotation_btn)
 
     def eventFilter(self, obj, event):
         """处理轮换按钮的右键菜单"""
-        from PySide6.QtCore import Qt, QEvent
         if obj is self.rotation_btn and event.type() == QEvent.ContextMenu:
             self._show_rotation_menu(event.globalPos())
             return True
