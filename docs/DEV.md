@@ -541,6 +541,15 @@ pip install PySide6-Multimedia
 - `tests/test_wallpaper_setter.py` 重写（15→31 用例），`tests/test_db.py` 新增 5 个内容分级测试
 - 全部 187 个测试通过
 
+### v0.4.1 (2026-04-26)
+
+- `core/wallpaper_setter.py` `_apply_we_cli` 改用 Popen 非阻塞（不再阻塞 UI 线程）
+- `core/wallpaper_setter.py` `_find_we_exe` 首次查找后缓存结果（`_we_exe_cache` 模块变量）
+- `core/wallpaper_setter.py` `_we_simple_command` 改用 Popen 非阻塞
+- `ui/filter_bar.py` 内容区包裹 `QScrollArea`，窗口过窄时水平滚动替代重叠
+- `ui/theme.py` 亮色主题 `text_muted` / `text_dim` / `text_placeholder` 对比度提升至 WCAG AA
+- `ui/theme.py` 新增 `#filterBarScroll` / `#filterBarContainer` 透明背景规则
+
 ### v0.2.0 (2026-04-26)
 
 - 新增 `core/wallpaper_setter.py`（壁纸设置，Windows API + WE 命令行，514 行）

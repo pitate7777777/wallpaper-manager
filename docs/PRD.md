@@ -1,7 +1,7 @@
 # 需求文档 (PRD)
 
 > **项目名称**: Wallpaper Manager
-> **版本**: v0.4.0
+> **版本**: v0.4.1
 > **日期**: 2026-04-26
 > **状态**: Phase 3 完成
 
@@ -567,3 +567,19 @@ wallpaper-manager/
 - `tests/test_we_controller.py` → `deprecated/test_we_controller.py`
 
 **测试：** 187 passed（+5 内容分级, +16 WE CLI, -20 已废弃 we_controller）
+
+### v0.4.1 (2026-04-26) — Bug 修复 + 性能优化
+
+**修复：**
+- `ui/filter_bar.py` — 窗口过窄时按钮重叠，内容区包裹 `QScrollArea` 水平滚动
+- `ui/theme.py` — 亮色主题弱化文字对比度不足
+  - `text_muted`: #888898 → #5a5a6a (3.0:1 → 5.7:1)
+  - `text_dim`: #666678 → #4a4a5a
+  - `text_placeholder`: #a0a0b0 → #5c5c6c (2.0:1 → 5.0:1)
+  - 全部达到 WCAG AA 4.5:1 标准
+
+**性能：**
+- `core/wallpaper_setter.py` — WE CLI 非阻塞化
+  - `_apply_we_cli`: `subprocess.run` → `Popen` (fire-and-forget)
+  - `_we_simple_command`: 同样改为 `Popen` 非阻塞
+  - `_find_we_exe`: 首次查找后缓存结果，避免重复扫描文件系统
