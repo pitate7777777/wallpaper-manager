@@ -56,6 +56,7 @@ jobs:
           pip install PySide6-Multimedia || echo "PySide6-Multimedia not available, video preview disabled"
 
       - name: Build with PyInstaller
+        shell: pwsh
         run: python scripts/build.py --no-open
 
       - name: Upload artifact

@@ -13,6 +13,15 @@ import time
 from pathlib import Path
 
 
+# 强制 stdout/sderr 使用 UTF-8（CI 环境兼容性关键 fix）
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+
 # 项目根目录
 ROOT = Path(__file__).resolve().parent.parent
 BUILD_DIR = ROOT / "build"
@@ -153,9 +162,9 @@ def verify():
     for name in key_files:
         p = dist / name
         if p.exists():
-            log(f"  ✓ {name}/")
+            log(f"  [OK] {name}/")
         else:
-            log(f"  ✗ {name}/ (缺失)", "WARN")
+            log(f"  [MISSING] {name}/", "WARN")
 
 
 def open_output():
