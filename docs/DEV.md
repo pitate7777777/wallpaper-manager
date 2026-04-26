@@ -495,10 +495,8 @@ pip install PySide6-Multimedia
 
 1. **WE WebSocket 控制不可用** — Wallpaper Engine 没有公开 API，PoC 仅供参考（已移至 `deprecated/`）
 2. **仅支持 Windows** — 壁纸设置功能依赖 Windows API 和 WE 官方 CLI
-3. **缩略图缓存无大小限制** — 大量壁纸时 thumbs 目录可能较大（通常 <100MB）
-4. **单线程扫描** — 多目录顺序扫描，大库可能较慢
-5. **正则搜索性能** — 正则模式先用 LIKE 初筛再 Python 侧匹配，大库下可能较慢
-6. **无自动更新机制** — 用户需手动下载新版本
+3. **多目录仍为顺序扫描** — 每个目录内已并行解析，但多个目录之间仍串行
+4. **无自动更新机制** — 用户需手动下载新版本
 
 ## Code Review 记录
 
@@ -521,6 +519,14 @@ pip install PySide6-Multimedia
 - UI 层 inline 样式需注意主题切换后的一致性（已部分修复）
 - 多线程模型合理：ScanWorker/ThumbnailWorker/ExportWorker/ImportWorker 均为 QThread，closeEvent 统一清理
 - 测试覆盖充分，monkeypatch 隔离策略正确
+
+### 2026-04-26 性能优化（三个已知限制）
+
+| # | 问题 | 方案 | 文件 |
+|---|------|------|------|
+| 1 | 正则搜索大库加载全部记录到 Python | 注册 SQLite 自定义 `REGEXP` 函数，正则过滤下推到数据库引擎 | `core/db.py` |
+| 2 | 缩略图缓存无上限 | 新增 LRU 淘汰机制（默认上限 500MB），按文件 atime 排序淘汰最久未访问的 | `core/thumbnail_worker.py` |
+| 3 | 单线程扫描大库慢 | `parse_project_json` 改用 `ThreadPoolExecutor(8)` 并行解析，数据库写入仍在主线程 | `core/scanner.py` |
 
 ## 变更日志
 

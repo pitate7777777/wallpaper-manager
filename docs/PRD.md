@@ -448,13 +448,18 @@ wallpaper-manager/
 
 ## 11. 变更日志
 
-### v0.4.2 (2026-04-26) — Code Review + 工程完善
+### v0.4.2 (2026-04-26) — Code Review + 性能优化 + 工程完善
 
 **修复（Code Review）：**
 - `core/db.py` — `query_wallpapers` 可变默认参数 `tags: list[str] = None` → `list[str] | None = None`
 - `core/wallpaper_setter.py` — `_we_simple_command` 假 fire-and-forget 实际阻塞 5 秒 → 真正非阻塞
 - `ui/main_window.py` — `stats_label` / 空状态使用 `text_muted` → `text_secondary`，亮色主题对比度达标
 - `core/export_worker.py` — 导出循环中未检查 `_cancelled` 标志
+
+**性能优化：**
+- `core/db.py` — 正则搜索性能：注册 SQLite 自定义 `REGEXP` 函数，正则过滤下推到数据库引擎，避免加载全部记录到 Python 内存
+- `core/thumbnail_worker.py` — 缩略图缓存限制：新增 LRU 淘汰机制（默认上限 500MB），按文件 atime 排序淘汰最久未访问的文件；每生成 50 张检查一次缓存大小
+- `core/scanner.py` — 并行扫描：`parse_project_json` 改用 `ThreadPoolExecutor(8)` 并行解析 project.json（I/O 密集），数据库写入仍在主线程
 
 **新增：**
 - `.github/workflows/ci.yml` — GitHub Actions CI/CD（多版本测试 + Windows 构建 + Artifact 上传）
@@ -468,7 +473,7 @@ wallpaper-manager/
 - `requirements.txt` — 改为引用 `pyproject.toml`（`-e .`）
 - `config.py` — 补齐类型注解和 docstring
 - `ui/dir_manager_dialog.py` / `ui/tag_manager_dialog.py` — 辅助标签颜色统一
-- DEV.md: 新增 Code Review 记录 + 已知限制更新
+- DEV.md: 新增 Code Review 记录 + 性能优化记录 + 已知限制更新
 - PRD.md: 项目结构更新（含 .github、CI/CD）
 
 ### v0.4.1 (2026-04-26) — Bug 修复 + 性能优化

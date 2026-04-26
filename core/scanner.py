@@ -1,6 +1,10 @@
-"""扫描 Wallpaper Engine 本地目录，解析 project.json 入库"""
+"""扫描 Wallpaper Engine 本地目录，解析 project.json 入库
+
+使用线程池并行解析 project.json（I/O 密集），数据库写入在主线程完成。
+"""
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -8,6 +12,9 @@ from .db import upsert_wallpaper, remove_wallpaper, get_connection
 from .models import Wallpaper
 
 logger = logging.getLogger(__name__)
+
+# 并行解析线程数（I/O 密集，可适当提高）
+_PARSE_WORKERS = 8
 
 
 def parse_project_json(folder_path: Path) -> Optional[Wallpaper]:
@@ -48,8 +55,7 @@ def scan_directory(
     root_dir: str,
     progress_callback: Callable[[int, int, str], None] = None,
 ) -> dict:
-    """
-    扫描目录下所有壁纸文件夹
+    """扫描目录下所有壁纸文件夹（并行解析 project.json）
 
     Args:
         root_dir: Wallpaper Engine 的 workshop 目录
@@ -67,29 +73,60 @@ def scan_directory(
     total = len(folders)
     stats = {"added": 0, "updated": 0, "removed": 0, "errors": 0}
 
+    if total == 0:
+        # 无壁纸目录，仅做清理
+        with get_connection() as conn:
+            existing = {r["folder_path"] for r in conn.execute(
+                "SELECT folder_path FROM wallpapers"
+            ).fetchall()}
+        for path in existing:
+            remove_wallpaper(path)
+            stats["removed"] += 1
+        return stats
+
     # 记录当前数据库中的路径，用于检测已删除的
     with get_connection() as conn:
-        existing = {r["folder_path"] for r in conn.execute("SELECT folder_path FROM wallpapers").fetchall()}
+        existing = {r["folder_path"] for r in conn.execute(
+            "SELECT folder_path FROM wallpapers"
+        ).fetchall()}
 
-    found_paths = set()
+    # ── 并行解析 project.json ────────────────────────────────
+    parsed: dict[str, Optional[Wallpaper]] = {}  # folder_path → Wallpaper | None
+    completed = 0
 
-    for i, folder in enumerate(folders):
-        if progress_callback:
-            progress_callback(i + 1, total, folder.name)
+    with ThreadPoolExecutor(max_workers=_PARSE_WORKERS) as pool:
+        future_to_folder = {
+            pool.submit(parse_project_json, folder): folder
+            for folder in folders
+        }
+        for future in as_completed(future_to_folder):
+            folder = future_to_folder[future]
+            completed += 1
+            if progress_callback:
+                progress_callback(completed, total, folder.name)
 
-        found_paths.add(str(folder))
-        wp = parse_project_json(folder)
-        if wp:
             try:
-                if str(folder) in existing:
-                    stats["updated"] += 1
-                else:
-                    stats["added"] += 1
-                upsert_wallpaper(wp)
+                wp = future.result()
+                parsed[str(folder)] = wp
             except Exception as e:
-                logger.error(f"入库失败: {folder} - {e}")
-                stats["errors"] += 1
-        else:
+                logger.error(f"解析异常: {folder} - {e}")
+                parsed[str(folder)] = None
+
+    # ── 批量写入数据库 ──────────────────────────────────────
+    found_paths = set(parsed.keys())
+
+    for folder_path_str, wp in parsed.items():
+        if wp is None:
+            stats["errors"] += 1
+            continue
+        try:
+            if folder_path_str in existing:
+                stats["updated"] += 1
+            else:
+                stats["added"] += 1
+            upsert_wallpaper(wp)
+        except Exception as e:
+            logger.error(f"入库失败: {folder_path_str} - {e}")
             stats["errors"] += 1
 
     # 清理已不存在的记录

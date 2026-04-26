@@ -1,5 +1,6 @@
 """SQLite 数据库层"""
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -67,12 +68,26 @@ def _run_migrations(conn: sqlite3.Connection) -> None:
     _set_version(conn, SCHEMA_VERSION)
 
 
+def _sqlite_regexp(pattern: str, value: str) -> bool:
+    """SQLite 自定义 REGEXP 函数，支持在 SQL 中直接做正则匹配。
+
+    匹配失败（无效正则或无匹配）返回 0，成功返回 1。
+    """
+    if value is None:
+        return False
+    try:
+        return bool(re.search(pattern, value, re.IGNORECASE))
+    except re.error:
+        return False
+
+
 @contextmanager
 def get_connection():
     """获取数据库连接（自动关闭）"""
     DB_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
+    conn.create_function("REGEXP", 2, _sqlite_regexp)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     try:
@@ -231,9 +246,15 @@ def query_wallpapers(
                 conditions.append("(title = ? OR tags = ?)")
                 params.extend([search, search])
             elif search_mode == "regex":
-                # 正则搜索：在 Python 侧过滤，先获取所有记录
-                # 这里用 LIKE 做初步筛选，Python 侧再做正则
-                pass  # 正则在下面特殊处理
+                # 正则搜索：通过 SQLite REGEXP 函数在数据库侧过滤
+                # 避免将全部记录加载到 Python 内存中
+                try:
+                    re.compile(search, re.IGNORECASE)
+                except re.error:
+                    # 无效正则，直接返回空结果
+                    return []
+                conditions.append("(title REGEXP ? OR tags REGEXP ?)")
+                params.extend([search, search])
             else:
                 # simple (默认，LIKE 匹配)
                 conditions.append("(title LIKE ? OR tags LIKE ?)")
@@ -270,19 +291,6 @@ def query_wallpapers(
         ).fetchall()
 
         results = [_row_to_wallpaper(r) for r in rows]
-
-        # 正则搜索后处理
-        if search and search_mode == "regex":
-            import re
-            try:
-                pattern = re.compile(search, re.IGNORECASE)
-                results = [
-                    wp for wp in results
-                    if pattern.search(wp.title) or pattern.search(wp.tags_display)
-                ]
-            except re.error:
-                # 无效正则，返回空结果
-                results = []
 
         # 排除标签后处理
         if exclude_tags:
