@@ -44,10 +44,10 @@
 │  │wallpaper_setter.py│ │rotation_worker.py│         │
 │  │壁纸设置(API+CLI)  │ │定时轮换          │         │
 │  └───────────────────┘ └──────────────────┘         │
-│  ┌───────────────────┐                               │
-│  │  tag_manager.py   │                               │
-│  │标签重命名/合并/删除│                               │
-│  └───────────────────┘                               │
+│  ┌───────────────────┐ ┌──────────────────┐         │
+│  │  tag_manager.py   │ │ version_check.py │         │
+│  │标签重命名/合并/删除│ │GitHub版本检查     │         │
+│  └───────────────────┘ └──────────────────┘         │
 ├──────────────────────────────────────────────────────┤
 │              config.py (配置持久化)                    │
 ├──────────────────────────────────────────────────────┤
@@ -280,6 +280,33 @@ def get_tag_stats() -> list[dict]  # [{"name": "anime", "count": 42}, ...]
 - 底层委托 `db.py` 执行，本模块负责日志记录
 - `db.py` 中的实现：遍历匹配的壁纸 → 修改 tags JSON 数组 → 去重 → commit
 - `TagManagerDialog`（`ui/tag_manager_dialog.py`）提供可视化管理界面
+
+### version_check.py
+
+```python
+def _parse_version(v: str) -> tuple[int, ...]
+def fetch_latest_release() -> Optional[dict]
+
+class VersionCheckWorker(QThread):
+    result = Signal(dict)  # {"has_update": bool, "current": str, "latest": str, "url": str}
+    def __init__(self, current_version: str, parent=None)
+```
+
+- 启动时在后台线程请求 GitHub API（10s 超时）
+- 版本比较：`v0.4.1` → `(0, 4, 1)` 元组比较
+- 无更新时静默；有更新时通过 `result` 信号通知 UI 弹窗
+- `app.py` 中 `window._version_checker` 引用防止 QThread 被 GC 回收
+
+### db.py 备份机制
+
+```python
+def backup_database(max_backups: int = 3) -> Optional[Path]
+```
+
+- `init_db()` 检测到需要迁移时自动调用备份
+- 备份位置：`~/.wallpaper-manager/backups/wallpapers_YYYYMMDD_HHMMSS.db`
+- 自动清理：保留最近 `max_backups` 份，超出按修改时间淘汰
+- 使用 `shutil.copy2` 保留文件元数据
 
 ### db.py 高级搜索
 
@@ -534,6 +561,30 @@ pip install PySide6-Multimedia
 |---|------|------|------|
 | 1 | `core/scanner.py` | 每个壁纸单独 `upsert_wallpaper()` 开连接 + commit，500 张 = 500 次事务 | 改为单事务批量写入（`with get_connection()` + `conn.commit()`） |
 | 2 | `core/thumbnail_worker.py` | `_evict_lru` 日志释放空间计算有 bug（`_get_cache_size() - current_size` 为负值） | 用 `original_size - current_size` 计算实际释放量 |
+
+### 2026-04-26 工程质量提升审查
+
+**本次变更范围：** 版本检查 / 数据备份 / 日志持久化 / 扫描容错 / extra_data / 多目录并行 / 清理 deprecated
+
+**已修复问题：**
+
+| # | 严重度 | 文件 | 问题 | 修复 |
+|---|--------|------|------|------|
+| 1 | 🟡 中 | `core/db.py` | `_migrate_v2` ALTER TABLE 与 CREATE TABLE 冲突（CREATE TABLE 已含 extra_data 列时迁移报 duplicate column） | 迁移改为幂等：先 `PRAGMA table_info` 检查列是否存在 |
+| 2 | 🟡 中 | `core/scanner.py` | `tags` 字段未校验类型，混入整数/对象时 `json.dumps` 可能异常 | 增加 `isinstance` 校验，非列表降级为空列表，混入数字自动转字符串 |
+| 3 | 🟢 低 | `core/scanner.py` | `project.json` 顶层非对象（如数组）时 `data.get()` 抛 AttributeError | 增加 `isinstance(data, dict)` 前置检查 |
+| 4 | 🟢 低 | `core/db.py` | `backup_database` docstring 声称返回值与实现不一致 | 修正为"数据库不存在或备份失败返回 None" |
+| 5 | 🟢 低 | `core/scanner.py` | version 字段注释块未完成（残留空注释行） | 合并为单行注释 |
+
+**审查结论：**
+
+- **版本检查**（`version_check.py`）：网络请求有 10s 超时，`TimeoutError` 被 `OSError` 捕获，异常安全 ✅
+- **数据库备份**：迁移前自动备份 + 最多保留 3 份，`shutil.copy2` 保留元数据 ✅
+- **扫描容错**：标签类型校验 + 顶层类型检查 + 错误详情收集，三重防护 ✅
+- **多目录并行**：`ThreadPoolExecutor(max_workers=min(N, 4))` 限制并发，避免资源争用 ✅
+- **extra_data 保留**：`_PARSED_KEYS` frozenset 精确控制已解析字段，其余完整保留 ✅
+- **GC 防护**：`window._version_checker` 防止 QThread 被提前回收 ✅
+- **测试覆盖**：205 个测试全部通过，新增 18 个覆盖标签校验/extra_data/Schema 迁移/备份 ✅
 
 ## 变更日志
 

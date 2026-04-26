@@ -61,9 +61,7 @@ def parse_project_json(folder_path: Path) -> Optional[Wallpaper]:
     extra = {k: v for k, v in data.items() if k not in _PARSED_KEYS}
     extra_data = json.dumps(extra, ensure_ascii=False) if extra else ""
 
-    # ── version 字段（可选）──────────────────────────────────
-    # 部分壁纸包含 version 字段，标识 project.json 格式版本
-    # 当前仅保留，不做逻辑判断
+    # 注: version 字段（部分壁纸包含）会自动归入 extra_data，当前不做独立逻辑判断
 
     return Wallpaper(
         folder_path=str(folder_path),

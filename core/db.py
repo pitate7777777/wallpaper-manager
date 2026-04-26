@@ -162,7 +162,7 @@ def backup_database(max_backups: int = 3) -> Optional[Path]:
     """备份数据库文件，保留最近 max_backups 份。
 
     Returns:
-        备份文件路径，失败返回 None
+        备份文件路径；数据库不存在或备份失败返回 None
     """
     import shutil
 
