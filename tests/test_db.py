@@ -267,3 +267,90 @@ class TestRowToWallpaper:
         upsert_wallpaper(wp)
         results = query_wallpapers()
         assert results[0].tags == ["a", "b", "中文标签"]
+
+
+class TestTagManagement:
+    """标签管理: rename_tag / merge_tags / delete_tag"""
+
+    def test_rename_tag(self):
+        from core.db import upsert_wallpaper, rename_tag, get_all_tags
+        upsert_wallpaper(Wallpaper(folder_path="/tr1", tags=["old", "keep"]))
+        upsert_wallpaper(Wallpaper(folder_path="/tr2", tags=["old", "other"]))
+        upsert_wallpaper(Wallpaper(folder_path="/tr3", tags=["keep"]))
+
+        count = rename_tag("old", "new")
+        assert count == 2
+
+        tags = get_all_tags()
+        assert "old" not in tags
+        assert "new" in tags
+        assert "keep" in tags
+
+    def test_rename_tag_no_match(self):
+        from core.db import upsert_wallpaper, rename_tag
+        upsert_wallpaper(Wallpaper(folder_path="/trn1", tags=["abc"]))
+        assert rename_tag("nonexistent", "new") == 0
+
+    def test_rename_tag_noop(self):
+        from core.db import rename_tag
+        assert rename_tag("", "new") == 0
+        assert rename_tag("old", "") == 0
+        assert rename_tag("same", "same") == 0
+
+    def test_merge_tags(self):
+        from core.db import upsert_wallpaper, merge_tags, query_wallpapers
+        upsert_wallpaper(Wallpaper(folder_path="/tm1", tags=["cat", "animal", "keep"]))
+        upsert_wallpaper(Wallpaper(folder_path="/tm2", tags=["dog", "pet"]))
+        upsert_wallpaper(Wallpaper(folder_path="/tm3", tags=["cat", "dog"]))
+
+        count = merge_tags(["cat", "dog", "animal"], "pets")
+        assert count == 3
+
+        all_tags = set()
+        for wp in query_wallpapers():
+            all_tags.update(wp.tags)
+        assert "cat" not in all_tags
+        assert "dog" not in all_tags
+        assert "animal" not in all_tags
+        assert "pets" in all_tags
+
+    def test_merge_tags_target_in_source(self):
+        from core.db import upsert_wallpaper, merge_tags, query_wallpapers
+        upsert_wallpaper(Wallpaper(folder_path="/tmt1", tags=["a", "b"]))
+        count = merge_tags(["a", "b", "a"], "a")
+        assert count == 1
+        assert query_wallpapers()[0].tags == ["a"]
+
+    def test_merge_tags_empty(self):
+        from core.db import merge_tags
+        assert merge_tags([], "target") == 0
+        assert merge_tags(["a"], "") == 0
+
+    def test_delete_tag(self):
+        from core.db import upsert_wallpaper, delete_tag, get_all_tags
+        upsert_wallpaper(Wallpaper(folder_path="/td1", tags=["del", "keep"]))
+        upsert_wallpaper(Wallpaper(folder_path="/td2", tags=["del", "other"]))
+        upsert_wallpaper(Wallpaper(folder_path="/td3", tags=["keep"]))
+
+        count = delete_tag("del")
+        assert count == 2
+
+        tags = get_all_tags()
+        assert "del" not in tags
+        assert "keep" in tags
+
+    def test_delete_tag_no_match(self):
+        from core.db import upsert_wallpaper, delete_tag
+        upsert_wallpaper(Wallpaper(folder_path="/tdn1", tags=["abc"]))
+        assert delete_tag("nonexistent") == 0
+
+    def test_delete_tag_empty(self):
+        from core.db import delete_tag
+        assert delete_tag("") == 0
+
+    def test_rename_then_delete(self):
+        from core.db import upsert_wallpaper, rename_tag, delete_tag, get_all_tags
+        upsert_wallpaper(Wallpaper(folder_path="/trd1", tags=["old", "keep"]))
+        rename_tag("old", "new")
+        delete_tag("new")
+        assert get_all_tags() == ["keep"]

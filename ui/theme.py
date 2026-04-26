@@ -1,9 +1,11 @@
-"""主题系统 - 集中管理所有颜色常量和样式表生成"""
+"""主题系统 - 集中管理所有颜色常量和样式表生成
 
+支持多主题切换。每个主题是一个完整的 COLORS 字典。
+"""
 
-# ── 颜色常量 ────────────────────────────────────────────────────
+# ── 暗色主题（默认）──────────────────────────────────────────
 
-COLORS = {
+DARK_THEME = {
     # ── 基础背景 ──────────────────────────────────────────────
     "bg_main": "#0f0f1a",            # 主窗口、滚动区域、对话框、滚动条背景
     "bg_panel": "#1a1a2e",           # 面板背景（过滤栏、卡片、进度条、消息框）
@@ -47,13 +49,19 @@ COLORS = {
 }
 
 
-def generate_stylesheet(colors: dict[str, str] | None = None) -> str:
+def generate_stylesheet(theme_name: str | None = None, colors: dict[str, str] | None = None) -> str:
     """生成完整的 QSS 样式表。
 
     Args:
-        colors: 颜色字典，默认使用 COLORS 常量。
+        theme_name: 主题名称（"dark"/"light"），优先级高于 colors。
+        colors: 直接传入颜色字典（向后兼容）。若同时指定 theme_name，以 theme_name 为准。
     """
-    c = colors or COLORS
+    if theme_name is not None:
+        c = THEMES.get(theme_name, COLORS)
+    elif colors is not None:
+        c = colors
+    else:
+        c = COLORS
     return f"""
 QMainWindow {{
     background-color: {c['bg_main']};
@@ -249,3 +257,99 @@ QSlider::sub-page:horizontal {{
     border-radius: 2px;
 }}
 """
+
+
+# ── 亮色主题 ──────────────────────────────────────────────────
+
+LIGHT_THEME = {
+    # ── 基础背景 ──────────────────────────────────────────────
+    "bg_main": "#f5f5f7",
+    "bg_panel": "#ffffff",
+    "bg_input": "#e8e8ed",
+    "bg_preview": "#e0e0e5",
+    "bg_info": "#ececf0",
+    "bg_selected": "#d0d8f0",
+    "bg_card_hover": "#eaeaf0",
+    "bg_selected_hover": "#c0c8e8",
+    "bg_dropdown": "#ffffff",
+
+    # ── 边框 ──────────────────────────────────────────────────
+    "border": "#c8c8d0",
+    "border_focus": "#8888b0",
+    "border_selected": "#4a7aff",
+    "border_selected_hover": "#3a6aef",
+    "border_button": "#b0b0b8",
+
+    # ── 文本 ──────────────────────────────────────────────────
+    "text_primary": "#1a1a2e",
+    "text_secondary": "#3a3a50",
+    "text_muted": "#888898",
+    "text_dim": "#666678",
+    "text_placeholder": "#a0a0b0",
+
+    # ── 选择 ──────────────────────────────────────────────────
+    "selection_bg": "#c0c8e0",
+    "selection_text": "#2a5adf",
+
+    # ── 按钮 ──────────────────────────────────────────────────
+    "btn_bg": "#e0e0e8",
+    "btn_hover": "#d0d0e0",
+    "btn_pressed": "#c0c0d0",
+    "btn_scan_bg": "#4a7aff",
+    "btn_scan_hover": "#3a6aef",
+    "btn_clear_bg": "#d8d8e0",
+    "btn_clear_hover": "#c8c8d8",
+
+    # ── 分隔线 ────────────────────────────────────────────────
+    "separator": "#c8c8d0",
+}
+
+
+# ── 主题注册表 ────────────────────────────────────────────────
+
+THEMES: dict[str, dict[str, str]] = {
+    "dark": DARK_THEME,
+    "light": LIGHT_THEME,
+}
+
+# 当前活跃主题（模块级可变状态）
+_current_theme_name = "dark"
+COLORS = dict(DARK_THEME)
+
+
+def get_theme_names() -> list[str]:
+    """返回所有可用主题名称"""
+    return list(THEMES.keys())
+
+
+def get_current_theme_name() -> str:
+    """返回当前主题名称"""
+    return _current_theme_name
+
+
+def set_theme(name: str) -> None:
+    """切换当前主题。
+
+    Args:
+        name: 主题名称（必须在 THEMES 中注册）
+
+    Raises:
+        KeyError: 主题名称不存在
+    """
+    global _current_theme_name
+    if name not in THEMES:
+        raise KeyError(f"未知主题: {name}，可用: {list(THEMES.keys())}")
+    # 原地更新 COLORS，保持引用不变（模块级 import 不会失效）
+    COLORS.clear()
+    COLORS.update(THEMES[name])
+    _current_theme_name = name
+
+
+def register_theme(name: str, colors: dict[str, str]) -> None:
+    """注册自定义主题。
+
+    Args:
+        name: 主题名称
+        colors: 完整的颜色字典（需包含 DARK_THEME 的所有 key）
+    """
+    THEMES[name] = dict(colors)

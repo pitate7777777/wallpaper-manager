@@ -1,4 +1,4 @@
-"""壁纸卡片组件 - 支持多选 + 缩略图缓存"""
+"""壁纸卡片组件 - 支持多选 + 缩略图缓存 + 可调尺寸"""
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -11,9 +11,28 @@ from core.models import Wallpaper
 from core.thumbnail_worker import get_thumb_path
 from ui.theme import COLORS
 
-# 预览图尺寸
+# 卡片尺寸预设 (preview_w, preview_h)
+CARD_SIZES = {
+    "small":  (160, 120),
+    "medium": (220, 160),
+    "large":  (320, 240),
+}
+
+# 默认尺寸（保持向后兼容）
 CARD_WIDTH = 220
 CARD_HEIGHT = 160
+
+
+def get_card_dimensions(size: str = "medium") -> tuple[int, int]:
+    """获取卡片预览尺寸
+
+    Args:
+        size: "small" / "medium" / "large"
+
+    Returns:
+        (preview_width, preview_height)
+    """
+    return CARD_SIZES.get(size, CARD_SIZES["medium"])
 
 
 class WallpaperCard(QFrame):
@@ -25,13 +44,14 @@ class WallpaperCard(QFrame):
     favorite_toggled = Signal(int)   # wallpaper id
     context_menu_requested = Signal(int, object)  # id, global_pos
 
-    def __init__(self, wallpaper: Wallpaper, parent=None):
+    def __init__(self, wallpaper: Wallpaper, size: str = "medium", parent=None):
         super().__init__(parent)
         self.wallpaper = wallpaper
         self._selected = False
+        self._preview_w, self._preview_h = get_card_dimensions(size)
         self.setObjectName("wallpaperCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(CARD_WIDTH + 16, CARD_HEIGHT + 72)
+        self.setFixedSize(self._preview_w + 16, self._preview_h + 72)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
 
@@ -44,7 +64,7 @@ class WallpaperCard(QFrame):
 
         # 预览图
         self.preview_label = QLabel()
-        self.preview_label.setFixedSize(CARD_WIDTH, CARD_HEIGHT)
+        self.preview_label.setFixedSize(self._preview_w, self._preview_h)
         self.preview_label.setAlignment(Qt.AlignCenter)
         self.preview_label.setObjectName("previewLabel")
         self._load_preview()
@@ -80,6 +100,7 @@ class WallpaperCard(QFrame):
 
     def _load_preview(self):
         """加载预览图（优先使用缩略图缓存）"""
+        w, h = self._preview_w, self._preview_h
         # 先检查缩略图缓存
         preview_path = self.wallpaper.preview_path
         if preview_path:
@@ -88,7 +109,7 @@ class WallpaperCard(QFrame):
                 pixmap = QPixmap(str(thumb_path))
                 if not pixmap.isNull():
                     scaled = pixmap.scaled(
-                        CARD_WIDTH, CARD_HEIGHT,
+                        w, h,
                         Qt.KeepAspectRatio, Qt.SmoothTransformation,
                     )
                     self.preview_label.setPixmap(scaled)
@@ -99,7 +120,7 @@ class WallpaperCard(QFrame):
             pixmap = QPixmap(preview_path)
             if not pixmap.isNull():
                 scaled = pixmap.scaled(
-                    CARD_WIDTH, CARD_HEIGHT,
+                    w, h,
                     Qt.KeepAspectRatio, Qt.SmoothTransformation,
                 )
                 self.preview_label.setPixmap(scaled)

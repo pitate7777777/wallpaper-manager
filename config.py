@@ -8,8 +8,8 @@ CONFIG_PATH = CONFIG_DIR / "config.json"
 DEFAULT_CONFIG = {
     "wallpaper_dirs": [],       # Wallpaper Engine 壁纸目录列表
     "last_used_dir": "",        # 上次使用的目录
-    "grid_card_size": "medium", # small / medium / large
-    "theme": "dark",
+    "card_size": "medium",      # small / medium / large
+    "theme": "dark",            # dark / light
     "thumb_quality": 85,        # 缩略图 JPEG 质量
     "thumb_size": [320, 180],   # 缩略图尺寸 [w, h]
 }

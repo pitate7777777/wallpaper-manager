@@ -19,13 +19,14 @@ from core.thumbnail_worker import ThumbnailWorker, cleanup_thumbs
 from core.export_worker import ExportWorker, ImportWorker
 from core.wallpaper_setter import WallpaperSetter
 from core.rotation_worker import RotationWorker
-from config import load_config, add_wallpaper_dir
-from ui.wallpaper_card import WallpaperCard, CARD_WIDTH
+from config import load_config, save_config, add_wallpaper_dir
+from ui.wallpaper_card import WallpaperCard, CARD_WIDTH, get_card_dimensions, CARD_SIZES
 from ui.filter_bar import FilterBar
 from ui.preview_dialog import PreviewDialog
 from ui.dir_manager_dialog import DirManagerDialog
+from ui.tag_manager_dialog import TagManagerDialog
 from ui.context_menu import WallpaperContextMenu
-from ui.theme import COLORS
+from ui.theme import COLORS, set_theme, generate_stylesheet
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,16 @@ class MainWindow(QMainWindow):
         self._search_text = ""
         self._type_filter = ""
         self._tag_filter = ""
+        self._selected_tags: list[str] = []
         self._favorites_only = False
         self._order_by = "title"
+        self._search_mode = "simple"
+        self._excluded_tags: list[str] = []
+
+        # 显示设置
+        cfg = load_config()
+        self._card_size = cfg.get("card_size", "medium")
+        self._current_theme = cfg.get("theme", "dark")
 
         # 多选状态
         self._selected_ids: set[int] = set()
@@ -103,6 +112,9 @@ class MainWindow(QMainWindow):
         self._rotation_worker = None
 
         self._setup_ui()
+        self._apply_theme(self._current_theme)
+        self.filter_bar.set_theme_display(self._current_theme)
+        self.filter_bar.set_card_size(self._card_size)
         self._load_data()
         self._start_thumbnail_generation()
 
@@ -120,6 +132,7 @@ class MainWindow(QMainWindow):
         self.filter_bar.search_changed.connect(self._on_search)
         self.filter_bar.type_changed.connect(self._on_type_filter)
         self.filter_bar.tag_changed.connect(self._on_tag_filter)
+        self.filter_bar.tags_changed.connect(self._on_tags_filter)
         self.filter_bar.favorites_toggled.connect(self._on_favorites)
         self.filter_bar.order_changed.connect(self._on_order)
         self.filter_bar.scan_clicked.connect(self._on_scan)
@@ -127,6 +140,11 @@ class MainWindow(QMainWindow):
         self.filter_bar.export_clicked.connect(self._on_export_all)
         self.filter_bar.import_clicked.connect(self._on_import)
         self.filter_bar.rotation_toggled.connect(self._on_rotation_toggle)
+        self.filter_bar.search_mode_changed.connect(self._on_search_mode)
+        self.filter_bar.exclude_tags_changed.connect(self._on_exclude_tags)
+        self.filter_bar.theme_changed.connect(self._on_theme_change)
+        self.filter_bar.card_size_changed.connect(self._on_card_size_change)
+        self.filter_bar.tag_manager_clicked.connect(self._on_tag_manager)
         main_layout.addWidget(self.filter_bar)
 
         # 统计 + 选择状态栏
@@ -187,12 +205,19 @@ class MainWindow(QMainWindow):
 
     def _load_data(self):
         db.init_db()
+        # 确定标签过滤：多选优先，单选回退
+        tags_filter = self._selected_tags if self._selected_tags else (
+            [self._tag_filter] if self._tag_filter else None
+        )
         wallpapers = db.query_wallpapers(
             search=self._search_text,
             wp_type=self._type_filter,
-            tags=[self._tag_filter] if self._tag_filter else None,
+            tags=tags_filter,
             favorites_only=self._favorites_only,
             order_by=self._order_by,
+            search_mode=self._search_mode,
+            tags_mode="any",
+            exclude_tags=self._excluded_tags if self._excluded_tags else None,
         )
         self._current_wallpapers = wallpapers
         self._populate_grid(wallpapers)
@@ -214,13 +239,14 @@ class MainWindow(QMainWindow):
             self.grid_layout.addWidget(empty, 0, 0, 1, -1)
             return
 
+        preview_w, preview_h = get_card_dimensions(self._card_size)
         area_width = self.scroll_area.viewport().width() - 20
-        card_full_width = CARD_WIDTH + 16 + CARD_SPACING
+        card_full_width = preview_w + 16 + CARD_SPACING
         cols = max(1, area_width // card_full_width)
 
         for i, wp in enumerate(wallpapers):
             row, col = divmod(i, cols)
-            card = WallpaperCard(wp)
+            card = WallpaperCard(wp, size=self._card_size)
             card.clicked.connect(self._on_card_clicked)
             card.ctrl_clicked.connect(self._on_card_ctrl_clicked)
             card.shift_clicked.connect(self._on_card_shift_clicked)
@@ -271,6 +297,13 @@ class MainWindow(QMainWindow):
 
     def _on_tag_filter(self, tag: str):
         self._tag_filter = tag
+        self._selected_tags = []  # 清除多选
+        self._load_data()
+
+    def _on_tags_filter(self, tags: list[str]):
+        """多选标签过滤"""
+        self._selected_tags = tags
+        self._tag_filter = ""  # 清除单选
         self._load_data()
 
     def _on_favorites(self, checked: bool):
@@ -279,6 +312,16 @@ class MainWindow(QMainWindow):
 
     def _on_order(self, order: str):
         self._order_by = order
+        self._load_data()
+
+    def _on_search_mode(self, mode: str):
+        """搜索模式变更"""
+        self._search_mode = mode
+        self._load_data()
+
+    def _on_exclude_tags(self, tags: list[str]):
+        """排除标签变更"""
+        self._excluded_tags = tags
         self._load_data()
 
     def _reload_with_delay(self):
@@ -591,6 +634,56 @@ class MainWindow(QMainWindow):
             self._cards[wallpaper_id].fav_btn.setText(emoji)
         self._update_stats()
 
+    # ─── 标签管理 ─────────────────────────────────────────────
+
+    def _on_tag_manager(self):
+        """打开标签管理对话框"""
+        dlg = TagManagerDialog(self)
+        dlg.tags_changed.connect(self._on_tags_changed)
+        dlg.exec()
+
+    def _on_tags_changed(self):
+        """标签变化后刷新"""
+        self._update_tags()
+        self.status_bar.showMessage("🏷️ 标签已更新", 2000)
+
+    # ─── 主题切换 ─────────────────────────────────────────────
+
+    def _on_theme_change(self, theme_name: str):
+        """切换主题"""
+        self._apply_theme(theme_name)
+        self._current_theme = theme_name
+        # 保存到配置
+        cfg = load_config()
+        cfg["theme"] = theme_name
+        save_config(cfg)
+        self.status_bar.showMessage(
+            f"🎨 已切换到{'亮色' if theme_name == 'light' else '暗色'}主题", 2000
+        )
+
+    def _apply_theme(self, theme_name: str):
+        """应用主题样式表"""
+        from ui.theme import set_theme, generate_stylesheet
+        try:
+            set_theme(theme_name)
+        except KeyError:
+            return
+        stylesheet = generate_stylesheet()
+        QApplication.instance().setStyleSheet(stylesheet)
+
+    # ─── 卡片尺寸 ─────────────────────────────────────────────
+
+    def _on_card_size_change(self, size: str):
+        """切换卡片尺寸"""
+        self._card_size = size
+        # 保存到配置
+        cfg = load_config()
+        cfg["card_size"] = size
+        save_config(cfg)
+        # 重新布局
+        self._load_data()
+        self.status_bar.showMessage(f"📐 卡片尺寸: {size}", 2000)
+
     # ─── 壁纸设置 ─────────────────────────────────────────────
 
     def _on_set_wallpaper(self):
@@ -740,8 +833,9 @@ class MainWindow(QMainWindow):
         if not self._current_wallpapers:
             return
 
+        preview_w, preview_h = get_card_dimensions(self._card_size)
         area_width = self.scroll_area.viewport().width() - 20
-        card_full_width = CARD_WIDTH + 16 + CARD_SPACING
+        card_full_width = preview_w + 16 + CARD_SPACING
         cols = max(1, area_width // card_full_width)
 
         # 收集当前所有卡片（保持顺序）

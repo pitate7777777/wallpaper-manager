@@ -195,8 +195,22 @@ def query_wallpapers(
     tags: list[str] = None,
     favorites_only: bool = False,
     order_by: str = "title",
+    search_mode: str = "simple",
+    tags_mode: str = "any",
+    exclude_tags: list[str] = None,
 ) -> list[Wallpaper]:
-    """查询壁纸列表"""
+    """查询壁纸列表
+
+    Args:
+        search: 搜索关键词
+        wp_type: 壁纸类型过滤
+        tags: 标签列表过滤
+        favorites_only: 仅收藏
+        order_by: 排序方式
+        search_mode: 搜索模式 - "simple"(LIKE), "regex", "exact"
+        tags_mode: 标签匹配模式 - "any"(匹配任一) / "all"(匹配全部)
+        exclude_tags: 要排除的标签列表
+    """
     # 白名单校验，防止 SQL 注入
     order_map = {
         "title": "title COLLATE NOCASE ASC",
@@ -211,17 +225,33 @@ def query_wallpapers(
         params = []
 
         if search:
-            conditions.append("(title LIKE ? OR tags LIKE ?)")
-            params.extend([f"%{search}%", f"%{search}%"])
+            if search_mode == "exact":
+                conditions.append("(title = ? OR tags = ?)")
+                params.extend([search, search])
+            elif search_mode == "regex":
+                # 正则搜索：在 Python 侧过滤，先获取所有记录
+                # 这里用 LIKE 做初步筛选，Python 侧再做正则
+                pass  # 正则在下面特殊处理
+            else:
+                # simple (默认，LIKE 匹配)
+                conditions.append("(title LIKE ? OR tags LIKE ?)")
+                params.extend([f"%{search}%", f"%{search}%"])
 
         if wp_type:
             conditions.append("wp_type = ?")
             params.append(wp_type)
 
         if tags:
-            for tag in tags:
-                conditions.append("tags LIKE ?")
-                params.append(f"%{tag}%")
+            if tags_mode == "all":
+                # 所有标签都必须匹配
+                for tag in tags:
+                    conditions.append("tags LIKE ?")
+                    params.append(f"%{tag}%")
+            else:
+                # 匹配任一标签
+                tag_conds = ["tags LIKE ?" for _ in tags]
+                conditions.append(f"({' OR '.join(tag_conds)})")
+                params.extend([f"%{t}%" for t in tags])
 
         if favorites_only:
             conditions.append("is_favorite = 1")
@@ -233,7 +263,29 @@ def query_wallpapers(
             params
         ).fetchall()
 
-        return [_row_to_wallpaper(r) for r in rows]
+        results = [_row_to_wallpaper(r) for r in rows]
+
+        # 正则搜索后处理
+        if search and search_mode == "regex":
+            import re
+            try:
+                pattern = re.compile(search, re.IGNORECASE)
+                results = [
+                    wp for wp in results
+                    if pattern.search(wp.title) or pattern.search(wp.tags_display)
+                ]
+            except re.error:
+                # 无效正则，返回空结果
+                results = []
+
+        # 排除标签后处理
+        if exclude_tags:
+            results = [
+                wp for wp in results
+                if not any(t in wp.tags for t in exclude_tags)
+            ]
+
+        return results
 
 
 def get_all_tags() -> list[str]:
@@ -267,3 +319,161 @@ def remove_wallpaper(folder_path: str):
     with get_connection() as conn:
         conn.execute("DELETE FROM wallpapers WHERE folder_path = ?", (folder_path,))
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# 标签管理
+# ---------------------------------------------------------------------------
+
+def rename_tag(old_name: str, new_name: str) -> int:
+    """重命名标签：将所有壁纸中的 old_name 替换为 new_name。
+
+    Args:
+        old_name: 旧标签名
+        new_name: 新标签名
+
+    Returns:
+        受影响的壁纸数量
+    """
+    if not old_name or not new_name or old_name == new_name:
+        return 0
+
+    count = 0
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, tags FROM wallpapers WHERE tags LIKE ?", (f'%"{old_name}"%',)
+        ).fetchall()
+        for row in rows:
+            tags = json.loads(row["tags"])
+            if old_name in tags:
+                tags = [new_name if t == old_name else t for t in tags]
+                # 去重
+                seen = []
+                for t in tags:
+                    if t not in seen:
+                        seen.append(t)
+                conn.execute(
+                    "UPDATE wallpapers SET tags = ? WHERE id = ?",
+                    (json.dumps(seen, ensure_ascii=False), row["id"]),
+                )
+                count += 1
+        conn.commit()
+    return count
+
+
+def merge_tags(source_names: list[str], target_name: str) -> int:
+    """合并多个标签为一个。
+
+    将 source_names 中的所有标签替换为 target_name。
+    同一张壁纸中如果存在多个源标签，合并后只保留一个 target_name。
+
+    Args:
+        source_names: 要合并的源标签列表
+        target_name: 合并后的目标标签名
+
+    Returns:
+        受影响的壁纸数量
+    """
+    if not source_names or not target_name:
+        return 0
+    source_set = set(source_names)
+    if target_name in source_set:
+        source_set.discard(target_name)
+        if not source_set:
+            return 0
+
+    count = 0
+    with get_connection() as conn:
+        # 查找包含任一源标签的壁纸
+        like_conditions = " OR ".join(["tags LIKE ?" for _ in source_set])
+        like_params = [f'%"{s}"%' for s in source_set]
+        rows = conn.execute(
+            f"SELECT id, tags FROM wallpapers WHERE {like_conditions}",
+            like_params,
+        ).fetchall()
+
+        for row in rows:
+            tags = json.loads(row["tags"])
+            if any(t in source_set for t in tags):
+                target_already = target_name in tags
+                new_tags = []
+                merged = False
+                for t in tags:
+                    if t in source_set:
+                        if not merged and not target_already:
+                            new_tags.append(target_name)
+                            merged = True
+                        # 跳过其他源标签
+                    else:
+                        new_tags.append(t)
+                if not merged and not target_already:
+                    new_tags.append(target_name)
+                # 去重：保留顺序
+                seen = []
+                for t in new_tags:
+                    if t not in seen:
+                        seen.append(t)
+                conn.execute(
+                    "UPDATE wallpapers SET tags = ? WHERE id = ?",
+                    (json.dumps(seen, ensure_ascii=False), row["id"]),
+                )
+                count += 1
+        conn.commit()
+    return count
+
+
+def update_wallpaper_tags(wallpaper_id: int, tags: list[str]):
+    """更新指定壁纸的标签"""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE wallpapers SET tags = ? WHERE id = ?",
+            (json.dumps(tags, ensure_ascii=False), wallpaper_id),
+        )
+        conn.commit()
+
+
+def get_tag_stats() -> list[dict]:
+    """获取标签统计信息（使用次数）
+
+    Returns:
+        [{"name": "anime", "count": 42}, ...] 按使用次数降序排列
+    """
+    with get_connection() as conn:
+        rows = conn.execute("SELECT tags FROM wallpapers WHERE tags != '[]'").fetchall()
+    tag_counts: dict[str, int] = {}
+    for row in rows:
+        for tag in json.loads(row["tags"]):
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+    stats = [{"name": k, "count": v} for k, v in tag_counts.items()]
+    stats.sort(key=lambda x: (-x["count"], x["name"]))
+    return stats
+
+
+def delete_tag(tag_name: str) -> int:
+    """从所有壁纸中删除指定标签。
+
+    Args:
+        tag_name: 要删除的标签名
+
+    Returns:
+        受影响的壁纸数量
+    """
+    if not tag_name:
+        return 0
+
+    count = 0
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, tags FROM wallpapers WHERE tags LIKE ?", (f'%"{tag_name}"%',)
+        ).fetchall()
+        for row in rows:
+            tags = json.loads(row["tags"])
+            if tag_name in tags:
+                tags = [t for t in tags if t != tag_name]
+                conn.execute(
+                    "UPDATE wallpapers SET tags = ? WHERE id = ?",
+                    (json.dumps(tags, ensure_ascii=False), row["id"]),
+                )
+                count += 1
+        conn.commit()
+    return count
