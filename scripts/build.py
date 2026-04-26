@@ -21,10 +21,16 @@ SPEC_FILE = ROOT / "build.spec"
 
 
 def log(msg: str, level: str = "INFO"):
-    """带时间戳的日志输出"""
+    """带时间戳的日志输出（兼容 GBK/UTF-8 终端）"""
     ts = time.strftime("%H:%M:%S")
-    prefix = {"INFO": "ℹ️", "OK": "✅", "WARN": "⚠️", "ERR": "❌"}.get(level, "  ")
-    print(f"[{ts}] {prefix} {msg}")
+    prefix_map = {"INFO": "i", "OK": "*", "WARN": "!", "ERR": "x"}
+    prefix = prefix_map.get(level, " ")
+    # 尝试 UTF-8 输出，回退到 ASCII 前缀避免 GBK 编码错误
+    try:
+        emoji_prefix = {"INFO": "\u2139\ufe0f", "OK": "\u2705", "WARN": "\u26a0\ufe0f", "ERR": "\u274c"}.get(level, " ")
+        print(f"[{ts}] {emoji_prefix} {msg}")
+    except (UnicodeEncodeError, UnicodeError):
+        print(f"[{ts}] [{level}] {msg}")
 
 
 def check_python():
