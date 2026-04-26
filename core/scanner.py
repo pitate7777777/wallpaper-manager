@@ -112,27 +112,54 @@ def scan_directory(
                 logger.error(f"解析异常: {folder} - {e}")
                 parsed[str(folder)] = None
 
-    # ── 批量写入数据库 ──────────────────────────────────────
+    # ── 批量写入数据库（单事务）────────────────────────────────
     found_paths = set(parsed.keys())
 
-    for folder_path_str, wp in parsed.items():
-        if wp is None:
-            stats["errors"] += 1
-            continue
+    with get_connection() as conn:
         try:
-            if folder_path_str in existing:
-                stats["updated"] += 1
-            else:
-                stats["added"] += 1
-            upsert_wallpaper(wp)
-        except Exception as e:
-            logger.error(f"入库失败: {folder_path_str} - {e}")
-            stats["errors"] += 1
+            for folder_path_str, wp in parsed.items():
+                if wp is None:
+                    stats["errors"] += 1
+                    continue
+                try:
+                    conn.execute("""
+                        INSERT INTO wallpapers (folder_path, workshop_id, title, wp_type, file,
+                                                preview, tags, content_rating, description,
+                                                scheme_color, is_favorite)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(folder_path) DO UPDATE SET
+                            workshop_id=excluded.workshop_id,
+                            title=excluded.title,
+                            wp_type=excluded.wp_type,
+                            file=excluded.file,
+                            preview=excluded.preview,
+                            tags=excluded.tags,
+                            content_rating=excluded.content_rating,
+                            description=excluded.description,
+                            scheme_color=excluded.scheme_color
+                    """, (
+                        wp.folder_path, wp.workshop_id, wp.title, wp.wp_type,
+                        wp.file, wp.preview, json.dumps(wp.tags, ensure_ascii=False),
+                        wp.content_rating, wp.description, wp.scheme_color,
+                        int(wp.is_favorite),
+                    ))
+                    if folder_path_str in existing:
+                        stats["updated"] += 1
+                    else:
+                        stats["added"] += 1
+                except Exception as e:
+                    logger.error(f"入库失败: {folder_path_str} - {e}")
+                    stats["errors"] += 1
 
-    # 清理已不存在的记录
-    removed_paths = existing - found_paths
-    for path in removed_paths:
-        remove_wallpaper(path)
-        stats["removed"] += 1
+            # 清理已不存在的记录
+            removed_paths = existing - found_paths
+            for path in removed_paths:
+                conn.execute("DELETE FROM wallpapers WHERE folder_path = ?", (path,))
+                stats["removed"] += 1
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     return stats

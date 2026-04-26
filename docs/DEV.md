@@ -526,7 +526,14 @@ pip install PySide6-Multimedia
 |---|------|------|------|
 | 1 | 正则搜索大库加载全部记录到 Python | 注册 SQLite 自定义 `REGEXP` 函数，正则过滤下推到数据库引擎 | `core/db.py` |
 | 2 | 缩略图缓存无上限 | 新增 LRU 淘汰机制（默认上限 500MB），按文件 atime 排序淘汰最久未访问的 | `core/thumbnail_worker.py` |
-| 3 | 单线程扫描大库慢 | `parse_project_json` 改用 `ThreadPoolExecutor(8)` 并行解析，数据库写入仍在主线程 | `core/scanner.py` |
+| 3 | 单线程扫描大库慢 | `parse_project_json` 改用 `ThreadPoolExecutor(8)` 并行解析，数据库批量写入改用单事务 | `core/scanner.py` |
+
+**Code Review 修复（第二轮）：**
+
+| # | 文件 | 问题 | 修复 |
+|---|------|------|------|
+| 1 | `core/scanner.py` | 每个壁纸单独 `upsert_wallpaper()` 开连接 + commit，500 张 = 500 次事务 | 改为单事务批量写入（`with get_connection()` + `conn.commit()`） |
+| 2 | `core/thumbnail_worker.py` | `_evict_lru` 日志释放空间计算有 bug（`_get_cache_size() - current_size` 为负值） | 用 `original_size - current_size` 计算实际释放量 |
 
 ## 变更日志
 

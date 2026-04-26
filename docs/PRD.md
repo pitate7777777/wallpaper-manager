@@ -459,7 +459,7 @@ wallpaper-manager/
 **性能优化：**
 - `core/db.py` — 正则搜索性能：注册 SQLite 自定义 `REGEXP` 函数，正则过滤下推到数据库引擎，避免加载全部记录到 Python 内存
 - `core/thumbnail_worker.py` — 缩略图缓存限制：新增 LRU 淘汰机制（默认上限 500MB），按文件 atime 排序淘汰最久未访问的文件；每生成 50 张检查一次缓存大小
-- `core/scanner.py` — 并行扫描：`parse_project_json` 改用 `ThreadPoolExecutor(8)` 并行解析 project.json（I/O 密集），数据库写入仍在主线程
+- `core/scanner.py` — 并行扫描：`parse_project_json` 改用 `ThreadPoolExecutor(8)` 并行解析 project.json（I/O 密集），数据库批量写入改用单事务（避免 N 次 commit 开销）
 
 **新增：**
 - `.github/workflows/ci.yml` — GitHub Actions CI/CD（多版本测试 + Windows 构建 + Artifact 上传）

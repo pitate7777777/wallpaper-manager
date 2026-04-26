@@ -60,6 +60,7 @@ def _evict_lru(max_bytes: int = MAX_CACHE_BYTES) -> int:
     # 按访问时间升序（最久未访问的排前面）
     files.sort(key=lambda x: x[0])
 
+    original_size = current_size
     removed = 0
     for atime, path, size in files:
         if current_size <= max_bytes:
@@ -72,9 +73,11 @@ def _evict_lru(max_bytes: int = MAX_CACHE_BYTES) -> int:
             logger.warning(f"淘汰缩略图失败: {path} - {e}")
 
     if removed:
+        freed_mb = (original_size - current_size) / 1024 / 1024
+        remaining_mb = current_size / 1024 / 1024
         logger.info(
             f"缩略图缓存淘汰: 删除 {removed} 个文件, "
-            f"释放 {( _get_cache_size() - current_size) / 1024 / 1024:.1f}MB"
+            f"释放 {freed_mb:.1f}MB, 剩余 {remaining_mb:.1f}MB"
         )
     return removed
 
