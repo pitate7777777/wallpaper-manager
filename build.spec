@@ -65,6 +65,7 @@ a = Analysis(
         'core.export_worker',
         'core.wallpaper_setter',
         'core.rotation_worker',
+        'core.version_check',
         'ui',
         'ui.main_window',
         'ui.filter_bar',
