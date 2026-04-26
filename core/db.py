@@ -192,12 +192,12 @@ def set_favorite(wallpaper_id: int, favorite: bool):
 def query_wallpapers(
     search: str = "",
     wp_type: str = "",
-    tags: list[str] = None,
+    tags: list[str] | None = None,
     favorites_only: bool = False,
     order_by: str = "title",
     search_mode: str = "simple",
     tags_mode: str = "any",
-    exclude_tags: list[str] = None,
+    exclude_tags: list[str] | None = None,
     content_rating: str = "",
 ) -> list[Wallpaper]:
     """查询壁纸列表

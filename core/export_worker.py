@@ -38,6 +38,10 @@ class ExportWorker(QThread):
             if self.wallpaper_ids is not None:
                 wallpapers = [wp for wp in wallpapers if wp.id in self.wallpaper_ids]
 
+            if self._cancelled:
+                self.finished.emit(False, "导出已取消")
+                return
+
             export_data = {
                 "version": "1.0",
                 "exported_at": datetime.now().isoformat(),

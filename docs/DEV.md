@@ -493,10 +493,34 @@ pip install PySide6-Multimedia
 
 ## 已知限制
 
-1. **WE WebSocket 控制不可用** — Wallpaper Engine 没有公开 API，PoC 仅供参考
-2. **仅支持 Windows** — 壁纸设置功能依赖 Windows API
+1. **WE WebSocket 控制不可用** — Wallpaper Engine 没有公开 API，PoC 仅供参考（已移至 `deprecated/`）
+2. **仅支持 Windows** — 壁纸设置功能依赖 Windows API 和 WE 官方 CLI
 3. **缩略图缓存无大小限制** — 大量壁纸时 thumbs 目录可能较大（通常 <100MB）
 4. **单线程扫描** — 多目录顺序扫描，大库可能较慢
+5. **正则搜索性能** — 正则模式先用 LIKE 初筛再 Python 侧匹配，大库下可能较慢
+6. **无自动更新机制** — 用户需手动下载新版本
+
+## Code Review 记录
+
+### 2026-04-26 全面审查
+
+**已修复问题：**
+
+| # | 严重度 | 文件 | 问题 | 修复 |
+|---|--------|------|------|------|
+| 1 | 🟡 中 | `core/db.py` | `query_wallpapers` 使用可变默认参数 `tags: list[str] = None` | 改为 `list[str] \| None = None` |
+| 2 | 🟡 中 | `core/wallpaper_setter.py` | `_we_simple_command` 注释为 fire-and-forget 但实际 `proc.wait(timeout=5)` 阻塞 5 秒 | 改为 `DEVNULL` + 不等待 |
+| 3 | 🟡 中 | `ui/main_window.py` | `_on_theme_change` 中 `stats_label` 使用 `text_muted` 硬编码，主题切换后对比度不足 | 统一改为 `text_secondary` |
+| 4 | 🟢 低 | `ui/main_window.py` | `_populate_grid` 空状态提示使用 `text_muted`，亮色主题下可读性差 | 改为 `text_secondary` |
+| 5 | 🟢 低 | `core/export_worker.py` | `run()` 在查询后未检查 `_cancelled` 标志 | 查询后增加取消检查 |
+| 6 | 🟢 低 | `config.py` | 函数缺少类型注解和 docstring | 补齐 |
+
+**审查结论：**
+
+- 核心业务逻辑（db/scanner/models）质量良好，SQL 参数化查询无注入风险
+- UI 层 inline 样式需注意主题切换后的一致性（已部分修复）
+- 多线程模型合理：ScanWorker/ThumbnailWorker/ExportWorker/ImportWorker 均为 QThread，closeEvent 统一清理
+- 测试覆盖充分，monkeypatch 隔离策略正确
 
 ## 变更日志
 

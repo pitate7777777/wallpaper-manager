@@ -157,7 +157,7 @@ class MainWindow(QMainWindow):
 
         self.stats_label = QLabel()
         self.stats_label.setObjectName("statsLabel")
-        self.stats_label.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 12px;")
+        self.stats_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
         info_layout.addWidget(self.stats_label)
 
         info_layout.addStretch()
@@ -239,7 +239,7 @@ class MainWindow(QMainWindow):
         if not wallpapers:
             empty = QLabel("📭 没有找到壁纸\n\n点击「扫描」导入 Wallpaper Engine 壁纸\n或通过「目录」管理多个壁纸库")
             empty.setAlignment(Qt.AlignCenter)
-            empty.setStyleSheet(f"color: {COLORS['text_muted']}; font-size: 14px; padding: 60px;")
+            empty.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 14px; padding: 60px;")
             self.grid_layout.addWidget(empty, 0, 0, 1, -1)
             return
 
@@ -672,7 +672,7 @@ class MainWindow(QMainWindow):
             card._update_style()
         # 刷新 stats_label / selection_label 等 inline 样式
         self.stats_label.setStyleSheet(
-            f"color: {COLORS['text_muted']}; font-size: 12px;"
+            f"color: {COLORS['text_secondary']}; font-size: 12px;"
         )
         self.selection_label.setStyleSheet(
             f"color: {COLORS['selection_text']}; font-size: 12px;"

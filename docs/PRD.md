@@ -1,9 +1,9 @@
 # 需求文档 (PRD)
 
 > **项目名称**: Wallpaper Manager
-> **版本**: v0.4.1
+> **版本**: v0.4.2
 > **日期**: 2026-04-26
-> **状态**: Phase 3 完成
+> **状态**: Phase 3 完成 + Code Review
 
 ---
 
@@ -364,12 +364,15 @@ Wallpaper Engine 是 Steam 平台上的动态壁纸工具，用户通过 Worksho
 
 ```
 wallpaper-manager/
-├── app.py                  # 应用入口
+├── .github/
+│   └── workflows/
+│       └── ci.yml          # GitHub Actions CI/CD
+├── app.py                  # 应用入口（含动态 __version__）
 ├── config.py               # 配置管理
 ├── build.spec              # PyInstaller 打包配置
 ├── build.bat               # Windows 一键打包
-├── pyproject.toml          # 项目元数据
-├── requirements.txt        # 依赖清单
+├── pyproject.toml          # 项目元数据 + 依赖（版本号单一事实源）
+├── requirements.txt        # 开发快捷入口（→ pyproject.toml）
 ├── core/                   # 业务逻辑层
 │   ├── models.py           # 数据模型
 │   ├── db.py               # 数据库操作 + Schema 迁移 + 高级搜索
@@ -378,18 +381,16 @@ wallpaper-manager/
 │   ├── export_worker.py    # 导入/导出后台线程
 │   ├── wallpaper_setter.py # 壁纸设置（Windows API + WE CLI）
 │   ├── rotation_worker.py  # 壁纸定时轮换
-│   ├── tag_manager.py      # 标签管理
-│   └── we_controller.py    # [已废弃] WE WebSocket PoC
+│   └── tag_manager.py      # 标签管理
 ├── ui/                     # 界面层
-│   ├── theme.py            # 多主题系统（暗色/亮色）
+│   ├── theme.py            # 多主题系统（暗色/亮色）+ QSS 生成
 │   ├── main_window.py      # 主窗口（网格 + 过滤 + 扫描）
 │   ├── wallpaper_card.py   # 壁纸卡片组件（可变尺寸）
 │   ├── filter_bar.py       # 顶部搜索过滤栏
 │   ├── preview_dialog.py   # 大图/视频预览弹窗
 │   ├── context_menu.py     # 右键上下文菜单
 │   ├── dir_manager_dialog.py # 多目录管理对话框
-│   ├── tag_manager_dialog.py # 标签管理对话框
-│   └── __init__.py
+│   └── tag_manager_dialog.py # 标签管理对话框
 ├── deprecated/             # 已废弃模块（保留供参考）
 │   ├── we_controller.py    # WE WebSocket PoC（已确认无公开 API）
 │   └── test_we_controller.py
@@ -407,8 +408,6 @@ wallpaper-manager/
 ├── docs/
 │   ├── PRD.md              # 需求文档
 │   └── DEV.md              # 开发文档
-├── requirements.txt
-├── pyproject.toml
 └── README.md
 ```
 
@@ -448,6 +447,130 @@ wallpaper-manager/
 ---
 
 ## 11. 变更日志
+
+### v0.4.2 (2026-04-26) — Code Review + 工程完善
+
+**修复（Code Review）：**
+- `core/db.py` — `query_wallpapers` 可变默认参数 `tags: list[str] = None` → `list[str] | None = None`
+- `core/wallpaper_setter.py` — `_we_simple_command` 假 fire-and-forget 实际阻塞 5 秒 → 真正非阻塞
+- `ui/main_window.py` — `stats_label` / 空状态使用 `text_muted` → `text_secondary`，亮色主题对比度达标
+- `core/export_worker.py` — 导出循环中未检查 `_cancelled` 标志
+
+**新增：**
+- `.github/workflows/ci.yml` — GitHub Actions CI/CD（多版本测试 + Windows 构建 + Artifact 上传）
+- `app.py` — `__version__` 从 `pyproject.toml` 动态读取（单一事实源）
+- `ui/theme.py` — 对话框/消息框/输入框/分组框/提示框显式文字颜色规则
+- `ui/preview_dialog.py` — RichText 标签内联颜色，解决 Qt HTML 不继承 stylesheet 的问题
+
+**改进：**
+- README: 醒目 Windows 平台限制标注 + CI/CD + 版本管理说明
+- `pyproject.toml` — 版本号修正为 0.4.1（单一事实源）
+- `requirements.txt` — 改为引用 `pyproject.toml`（`-e .`）
+- `config.py` — 补齐类型注解和 docstring
+- `ui/dir_manager_dialog.py` / `ui/tag_manager_dialog.py` — 辅助标签颜色统一
+- DEV.md: 新增 Code Review 记录 + 已知限制更新
+- PRD.md: 项目结构更新（含 .github、CI/CD）
+
+### v0.4.1 (2026-04-26) — Bug 修复 + 性能优化
+
+**修复：**
+- `ui/filter_bar.py` — 窗口过窄时按钮重叠，内容区包裹 `QScrollArea` 水平滚动
+- `ui/theme.py` — 亮色主题弱化文字对比度不足
+  - `text_muted`: #888898 → #5a5a6a (3.0:1 → 5.7:1)
+  - `text_dim`: #666678 → #4a4a5a
+  - `text_placeholder`: #a0a0b0 → #5c5c6c (2.0:1 → 5.0:1)
+  - 全部达到 WCAG AA 4.5:1 标准
+
+**性能：**
+- `core/wallpaper_setter.py` — WE CLI 非阻塞化
+  - `_apply_we_cli`: `subprocess.run` → `Popen` (fire-and-forget)
+  - `_we_simple_command`: 同样改为 `Popen` 非阻塞
+  - `_find_we_exe`: 首次查找后缓存结果，避免重复扫描文件系统
+
+### v0.4.0 (2026-04-26) — 工程优化 + 功能完善
+
+**新增：**
+- `core/db.py` — 内容分级筛选
+  - `query_wallpapers()` 新增 `content_rating` 参数
+  - `get_all_ratings()` 获取所有去重分级（按频次降序）
+- `ui/filter_bar.py` — 内容分级下拉框（位于类型过滤之后）
+- `deprecated/` — 废弃模块目录，存放不再使用的代码
+
+**改进：**
+- `core/wallpaper_setter.py` — 基于官方 CLI 文档重写 WE 壁纸设置
+  - 使用 `-file` 参数（指向 project.json / .mp4 / index.html）替代 `-path`
+  - 新增 `_resolve_we_target()` 按壁纸类型解析正确目标文件
+  - 新增 `-monitor` 多显示器支持
+  - 新增 `we_pause/play/stop/mute/unmute/next_wallpaper/get_current` 辅助命令
+  - 移除无文档依据的配置文件回退方式
+- `ui/main_window.py` — 主题切换后刷新所有卡片 inline 样式 + filter_bar 分隔线
+- `ui/filter_bar.py` — 分隔线改为实例属性，新增 `refresh_theme()` 方法
+- `ui/context_menu.py` — 非 Windows 平台隐藏"设为桌面壁纸"和"设为 WE 壁纸"
+- `ui/filter_bar.py` — 非 Windows 平台隐藏壁纸轮换按钮及分隔线
+- `build.spec` — 移除 `websockets` hidden import
+- `requirements.txt` — 移除 `websockets` 依赖
+
+**废弃：**
+- `core/we_controller.py` → `deprecated/we_controller.py`（WE 无公开 WebSocket API）
+- `tests/test_we_controller.py` → `deprecated/test_we_controller.py`
+
+**测试：** 187 passed（+5 内容分级, +16 WE CLI, -20 已废弃 we_controller）
+
+### v0.3.0 (2026-04-26) — Phase 3 高级功能
+
+**新增：**
+- `ui/theme.py` — 多主题支持
+  - `LIGHT_THEME` 亮色主题色板
+  - `THEMES` 主题注册表 + `set_theme()` / `get_current_theme_name()`
+  - FilterBar 主题切换按钮（🌙/☀️）
+- `ui/wallpaper_card.py` — 缩略图尺寸选择
+  - `CARD_SIZES`: small(160×120) / medium(220×160) / large(320×240)
+  - FilterBar 尺寸下拉框
+- `core/tag_manager.py` — 标签管理
+  - `rename_tag()` / `merge_tags()` / `delete_tag()` / `get_tag_stats()`
+  - `ui/tag_manager_dialog.py` 管理对话框
+  - 33 个单元测试
+- `core/db.py` — 高级搜索
+  - `search_mode`: simple / regex / exact
+  - `tags_mode`: any / all
+  - `exclude_tags`: 排除标签
+  - `update_wallpaper_tags()` / `get_tag_stats()`
+- `scripts/build.py` — 跨平台打包脚本
+  - clean → build → verify 流程
+  - 支持 `--clean-only`, `--no-open` 参数
+- `tests/test_advanced_search.py` — 27 个高级搜索测试
+- `tests/test_tag_manager.py` — 33 个标签管理测试
+
+**改进：**
+- `build.spec` — 包含所有新模块 + 数据文件
+- `build.bat` — 自动检测 Python + 进度显示 + 自动打开输出目录
+- `config.py` — 新增 `card_size` 和 `theme` 配置项
+
+**测试：** 186 passed, 12 skipped
+
+### v0.2.0 (2026-04-26) — Phase 2 壁纸设置
+
+**新增：**
+- `core/wallpaper_setter.py` — 壁纸设置模块（514 行）
+  - `set_wallpaper()` — 通过 Windows API `SystemParametersInfoW` 设置桌面壁纸
+  - `get_current_wallpaper()` — 获取当前壁纸路径
+  - `set_wallpaper_we()` — 通过命令行或配置文件设置 WE 动态壁纸
+  - `find_we_install()` — 自动检测 WE 安装路径（Steam 库 + 注册表）
+  - `get_we_wallpaper_list()` — 列出所有 WE 壁纸
+- `core/rotation_worker.py` — 壁纸定时轮换（200 行）
+  - 三种模式：随机 / 顺序 / 收藏
+  - 可选间隔：5/15/30/60/120 分钟
+  - 信号：`wallpaper_changed` / `rotation_started` / `rotation_stopped`
+- `tests/test_wallpaper_setter.py` — 13 个单元测试
+- `tests/test_rotation_worker.py` — 12 个单元测试
+
+**UI 集成：**
+- 右键菜单新增"🖼️ 设为桌面壁纸"和"🎬 设为 WE 壁纸"
+- FilterBar 新增"🔄 自动轮换"按钮 + 右键设置（间隔/模式）
+- 主窗口集成轮换生命周期管理
+
+**依赖：**
+- `requirements.txt` 新增 `websockets>=12.0`
 
 ### v0.1.1 (2026-04-26) — 工程加固
 

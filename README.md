@@ -67,7 +67,10 @@ build.bat
 
 ```
 wallpaper-manager/
-├── app.py                  # 应用入口
+├── .github/
+│   └── workflows/
+│       └── ci.yml          # GitHub Actions CI/CD
+├── app.py                  # 应用入口（含动态 __version__）
 ├── config.py               # JSON 配置文件读写
 ├── build.spec              # PyInstaller 打包配置
 ├── build.bat               # Windows 一键打包脚本
@@ -81,7 +84,7 @@ wallpaper-manager/
 │   ├── rotation_worker.py  # 壁纸定时轮换
 │   └── tag_manager.py      # 标签管理
 ├── ui/                     # 界面层
-│   ├── theme.py            # 多主题系统（暗色/亮色）
+│   ├── theme.py            # 多主题系统（暗色/亮色）+ QSS 生成
 │   ├── main_window.py      # 主窗口（网格 + 过滤 + 扫描）
 │   ├── wallpaper_card.py   # 壁纸卡片组件（可变尺寸）
 │   ├── filter_bar.py       # 顶部搜索过滤栏
@@ -106,8 +109,8 @@ wallpaper-manager/
 ├── docs/
 │   ├── PRD.md              # 需求文档
 │   └── DEV.md              # 开发文档
-├── requirements.txt
-├── pyproject.toml
+├── requirements.txt        # 开发快捷入口（→ pyproject.toml）
+├── pyproject.toml          # 项目元数据 + 依赖（单一事实源）
 └── README.md
 ```
 
@@ -144,11 +147,27 @@ wallpaper-manager/
 ## 🧪 运行测试
 
 ```bash
-pip install pytest
+pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
 
 当前测试覆盖：187 个测试用例，覆盖全部核心模块。
+
+## 🏗️ CI/CD
+
+项目使用 GitHub Actions 自动化：
+
+- **测试**：每次 push / PR 自动在 Windows 上运行 Python 3.10 / 3.11 / 3.12 三版本测试
+- **构建**：push 到 main/master 时自动构建 exe 并上传 Artifact（保留 30 天）
+
+详见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
+
+## 📦 版本管理
+
+版本号**唯一事实源**为 [`pyproject.toml`](pyproject.toml) 中的 `version` 字段。
+
+- `app.py` 中的 `__version__` 通过 `importlib.metadata`（安装后）或 `tomllib`（开发模式）自动读取
+- 修改版本时只需改 `pyproject.toml` 一处
 
 ## 📄 License
 

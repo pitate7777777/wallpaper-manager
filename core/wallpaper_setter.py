@@ -457,17 +457,13 @@ class WallpaperSetter:
         logger.info(f"执行 WE CLI: {' '.join(cmd)}")
 
         try:
-            proc = subprocess.Popen(
+            # fire-and-forget: 命令发出后立即返回，不阻塞调用线程
+            subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            # 简单命令不等结果，fire-and-forget
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass  # 命令已发出，不管进程是否退出
             logger.info(f"WE {command} 命令已发出")
             return True
         except FileNotFoundError:

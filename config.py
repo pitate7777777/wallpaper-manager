@@ -5,7 +5,7 @@ from pathlib import Path
 CONFIG_DIR = Path.home() / ".wallpaper-manager"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict = {
     "wallpaper_dirs": [],       # Wallpaper Engine 壁纸目录列表
     "last_used_dir": "",        # 上次使用的目录
     "card_size": "medium",      # small / medium / large
@@ -16,6 +16,7 @@ DEFAULT_CONFIG = {
 
 
 def load_config() -> dict:
+    """加载配置文件，缺失字段用 DEFAULT_CONFIG 补齐。"""
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -27,13 +28,15 @@ def load_config() -> dict:
     return dict(DEFAULT_CONFIG)
 
 
-def save_config(cfg: dict):
+def save_config(cfg: dict) -> None:
+    """保存配置到文件。"""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
 
-def add_wallpaper_dir(directory: str):
+def add_wallpaper_dir(directory: str) -> None:
+    """添加壁纸目录到配置（去重）。"""
     cfg = load_config()
     if directory not in cfg["wallpaper_dirs"]:
         cfg["wallpaper_dirs"].append(directory)
