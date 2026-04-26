@@ -588,6 +588,21 @@ pip install PySide6-Multimedia
 
 ## 变更日志
 
+### v0.5.0 (2026-04-26) — 工程质量全面提升
+
+**新增：**
+- `core/version_check.py` — GitHub Release 版本检查（后台线程 + 10s 超时 + 弹窗提示）
+- `app.py` — 日志文件持久化（`~/.wallpaper-manager/logs/`，5MB 轮转 3 份）
+- `core/db.py` — Schema v2（`extra_data` 列）+ 迁移前自动备份（保留 3 份）
+- `core/models.py` — `Wallpaper.extra_data` 字段
+
+**改进：**
+- `core/scanner.py` — 非壁纸容错：tags 类型校验 + 顶层类型检查 + extra_data 保留 + 错误详情收集
+- `ui/main_window.py` — 多目录并行扫描（`ThreadPoolExecutor`）+ 错误详情弹窗
+- 测试用例 187 → 205（+18）
+
+**清理：** 删除 `deprecated/` 目录
+
 ### v0.3.0 (2026-04-26)
 
 - 新增多主题支持：`DARK_THEME` + `LIGHT_THEME`，`THEMES` 注册表，`set_theme()` 原地更新

@@ -446,6 +446,35 @@ wallpaper-manager/
 
 ## 11. 变更日志
 
+### v0.5.0 (2026-04-26) — 工程质量全面提升
+
+**新增：**
+- `core/version_check.py` — GitHub Release 版本检查（启动时后台检查，有新版本弹窗提示 + 跳转下载）
+- `app.py` — 日志文件持久化（`~/.wallpaper-manager/logs/`，5MB 轮转，保留 3 份）
+- `core/db.py` — 数据库自动备份（迁移前自动备份，保留最近 3 份到 `~/.wallpaper-manager/backups/`）
+- `core/db.py` — Schema v2 迁移框架（新增 `extra_data` 列，迁移幂等化）
+- `core/models.py` — `Wallpaper.extra_data` 字段（保留 project.json 中未解析的字段，JSON 序列化）
+
+**改进：**
+- `core/scanner.py` — 非壁纸文件容错：
+  - tags 类型校验（非列表→空列表，混入数字/对象→自动转换过滤）
+  - project.json 顶层非对象（如数组）→安全跳过
+  - 未解析字段保留到 extra_data，防止信息丢失
+  - 扫描错误详情收集（`error_details` 列表：文件名 + 原因）
+- `ui/main_window.py` — 多目录并行扫描（`ThreadPoolExecutor`，最多 4 并行）
+- `ui/main_window.py` — 扫描错误详情弹窗（显示失败文件名 + 原因，最多 5 条）
+- `core/export_worker.py` — 导入/导出支持 extra_data 字段
+- PRD.md 版本号改为引用 pyproject.toml（唯一事实源）
+- 测试用例从 187 增至 205（+18 新测试覆盖标签校验/extra_data/Schema 迁移/备份）
+
+**清理：**
+- 删除 `deprecated/` 目录（WE WebSocket 已确认不可用，代码保留在 Git 历史中）
+- 更新文档中的项目结构、已知限制、测试计数
+
+**修复（Code Review）：**
+- `core/db.py` — `_migrate_v2` 与 CREATE TABLE 冲突 → 幂等化（先检查列是否存在）
+- `core/scanner.py` — version 字段注释块未完成 → 合并为单行注释
+
 ### v0.4.2 (2026-04-26) — Code Review + 性能优化 + 工程完善
 
 **修复（Code Review）：**
