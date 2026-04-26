@@ -136,60 +136,42 @@ class TestResolveWeTarget:
 class TestApplyWeCli:
     """_apply_we_cli 测试"""
 
-    def test_success(self, tmp_path):
-        """CLI 成功执行"""
-        mock_exe = tmp_path / "wallpaper64.exe"
-        mock_exe.write_text("")
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
-            result = WallpaperSetter._apply_we_cli(str(mock_exe), "/wallpaper/project.json")
+    def test_success(self):
+        """CLI 成功发出命令"""
+        with patch("subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock()
+            result = WallpaperSetter._apply_we_cli("/fake/wallpaper64.exe", "/wallpaper/project.json")
             assert result is True
-            # 验证命令格式
-            args = mock_run.call_args[0][0]
+            args = mock_popen.call_args[0][0]
             assert "-control" in args
             assert "openWallpaper" in args
             assert "-file" in args
             assert "/wallpaper/project.json" in args
 
-    def test_with_monitor(self, tmp_path):
+    def test_with_monitor(self):
         """指定显示器参数"""
-        mock_exe = tmp_path / "wallpaper64.exe"
-        mock_exe.write_text("")
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("subprocess.Popen") as mock_popen:
+            mock_popen.return_value = MagicMock()
             result = WallpaperSetter._apply_we_cli(
-                str(mock_exe), "/wallpaper/project.json", monitor=1
+                "/fake/wallpaper64.exe", "/wallpaper/project.json", monitor=1
             )
             assert result is True
-            args = mock_run.call_args[0][0]
+            args = mock_popen.call_args[0][0]
             assert "-monitor" in args
             assert "1" in args
 
-    def test_failure_returns_false(self, tmp_path):
-        """CLI 失败返回 False"""
-        mock_exe = tmp_path / "wallpaper64.exe"
-        mock_exe.write_text("")
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=1,
-                stderr=b"error message",
-                stdout=b"",
-            )
-            result = WallpaperSetter._apply_we_cli(str(mock_exe), "/bad/path")
+    def test_file_not_found_returns_false(self):
+        """exe 不存在返回 False"""
+        with patch("subprocess.Popen") as mock_popen:
+            mock_popen.side_effect = FileNotFoundError("not found")
+            result = WallpaperSetter._apply_we_cli("/nonexistent.exe", "/wallpaper/project.json")
             assert result is False
 
-    def test_timeout_returns_false(self, tmp_path):
-        """超时返回 False"""
-        import subprocess
-        mock_exe = tmp_path / "wallpaper64.exe"
-        mock_exe.write_text("")
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=15)
-            result = WallpaperSetter._apply_we_cli(str(mock_exe), "/wallpaper/project.json")
+    def test_generic_exception_returns_false(self):
+        """其他异常返回 False"""
+        with patch("subprocess.Popen") as mock_popen:
+            mock_popen.side_effect = OSError("permission denied")
+            result = WallpaperSetter._apply_we_cli("/fake/wallpaper64.exe", "/wallpaper/project.json")
             assert result is False
 
 

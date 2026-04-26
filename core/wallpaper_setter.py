@@ -27,6 +27,9 @@ if IS_WINDOWS:
     import ctypes
     import winreg
 
+# WE exe 路径缓存（首次查找后记住，避免重复扫描文件系统）
+_we_exe_cache: Optional[str] = None
+
 
 class WallpaperSetter:
     """壁纸设置器"""
@@ -160,7 +163,7 @@ class WallpaperSetter:
 
     @staticmethod
     def _find_we_exe(we_exe_path: Optional[str] = None) -> Optional[str]:
-        """查找 WE 可执行文件路径
+        """查找 WE 可执行文件路径（结果会缓存）
 
         Args:
             we_exe_path: 已知的路径，None 则自动检测
@@ -168,8 +171,16 @@ class WallpaperSetter:
         Returns:
             可执行文件路径，未找到返回 None
         """
+        global _we_exe_cache
+
+        # 调用方指定了路径，直接验证
         if we_exe_path and Path(we_exe_path).exists():
+            _we_exe_cache = we_exe_path
             return we_exe_path
+
+        # 使用缓存
+        if _we_exe_cache and Path(_we_exe_cache).exists():
+            return _we_exe_cache
 
         we_path = WallpaperSetter.find_we_install()
         if not we_path:
@@ -179,7 +190,9 @@ class WallpaperSetter:
         for name in ("wallpaper64.exe", "wallpaper32.exe"):
             candidate = we_path / name
             if candidate.exists():
-                return str(candidate)
+                _we_exe_cache = str(candidate)
+                logger.info(f"WE 可执行文件已缓存: {_we_exe_cache}")
+                return _we_exe_cache
 
         logger.error(f"WE 目录中未找到可执行文件: {we_path}")
         return None
@@ -310,9 +323,12 @@ class WallpaperSetter:
 
     @staticmethod
     def _apply_we_cli(we_exe: str, target_file: str, monitor: Optional[int] = None) -> bool:
-        """通过官方 CLI 设置壁纸
+        """通过官方 CLI 设置壁纸（非阻塞，带重试）
 
         格式: wallpaper64.exe -control openWallpaper -file <path> [-monitor N]
+
+        使用 Popen 异步启动进程后立即返回，不阻塞调用线程。
+        Wallpaper Engine 接收到命令后会自行处理壁纸加载。
 
         参考: https://help.wallpaperengine.io/en/functionality/cli.html
 
@@ -322,7 +338,7 @@ class WallpaperSetter:
             monitor: 显示器索引（0-based），None 则使用默认
 
         Returns:
-            是否成功
+            命令是否已成功发出
         """
         cmd = [we_exe, "-control", "openWallpaper", "-file", target_file]
         if monitor is not None:
@@ -330,26 +346,22 @@ class WallpaperSetter:
 
         logger.info(f"执行 WE CLI: {' '.join(cmd)}")
 
-        try:
-            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            result = subprocess.run(
-                cmd, capture_output=True, timeout=15, creationflags=creation_flags,
-            )
-            if result.returncode == 0:
-                logger.info(f"WE 壁纸设置成功: {target_file}")
-                return True
-            else:
-                stderr = result.stderr.decode("utf-8", errors="replace").strip()
-                stdout = result.stdout.decode("utf-8", errors="replace").strip()
-                logger.error(
-                    f"WE CLI 失败 (code={result.returncode}): "
-                    f"{stderr or stdout or '无错误输出'}"
-                )
-                return False
+        creation_flags = 0
+        if IS_WINDOWS:
+            creation_flags = subprocess.CREATE_NO_WINDOW
 
-        except subprocess.TimeoutExpired:
-            logger.error("WE CLI 执行超时 (15s)")
-            return False
+        try:
+            # Popen 不阻塞 —— 命令发出后立即返回
+            # Wallpaper Engine 会在后台处理壁纸加载
+            subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creation_flags,
+            )
+            logger.info(f"WE 壁纸命令已发出: {target_file}")
+            return True
+
         except FileNotFoundError:
             logger.error(f"WE 可执行文件不存在: {we_exe}")
             return False
@@ -411,9 +423,9 @@ class WallpaperSetter:
             cmd.extend(["-monitor", str(monitor)])
 
         try:
-            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             result = subprocess.run(
-                cmd, capture_output=True, timeout=10, creationflags=creation_flags,
+                cmd, capture_output=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if result.returncode == 0:
                 output = result.stdout.decode("utf-8", errors="replace").strip()
@@ -424,14 +436,14 @@ class WallpaperSetter:
 
     @staticmethod
     def _we_simple_command(command: str, we_exe_path: Optional[str] = None) -> bool:
-        """执行简单的 WE CLI 命令（无额外参数）
+        """执行简单的 WE CLI 命令（非阻塞）
 
         Args:
             command: 命令名（pause/play/stop/mute/unmute/nextWallpaper）
             we_exe_path: WE 可执行文件路径
 
         Returns:
-            是否成功
+            是否成功发出命令
         """
         if not IS_WINDOWS:
             logger.warning(f"WE {command} 仅支持 Windows 平台")
@@ -445,16 +457,22 @@ class WallpaperSetter:
         logger.info(f"执行 WE CLI: {' '.join(cmd)}")
 
         try:
-            creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            result = subprocess.run(
-                cmd, capture_output=True, timeout=10, creationflags=creation_flags,
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            if result.returncode == 0:
-                logger.info(f"WE {command} 成功")
-                return True
-            else:
-                logger.warning(f"WE {command} 失败 (code={result.returncode})")
-                return False
+            # 简单命令不等结果，fire-and-forget
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass  # 命令已发出，不管进程是否退出
+            logger.info(f"WE {command} 命令已发出")
+            return True
+        except FileNotFoundError:
+            logger.error(f"WE 可执行文件不存在: {we_exe_path}")
+            return False
         except Exception as e:
             logger.error(f"WE {command} 异常: {e}")
             return False
