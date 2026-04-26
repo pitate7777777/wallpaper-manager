@@ -290,9 +290,9 @@ LIGHT_THEME = {
     # ── 文本 ──────────────────────────────────────────────────
     "text_primary": "#1a1a2e",
     "text_secondary": "#3a3a50",
-    "text_muted": "#888898",
-    "text_dim": "#666678",
-    "text_placeholder": "#a0a0b0",
+    "text_muted": "#5a5a6a",
+    "text_dim": "#4a4a5a",
+    "text_placeholder": "#5c5c6c",
 
     # ── 选择 ──────────────────────────────────────────────────
     "selection_bg": "#c0c8e0",
