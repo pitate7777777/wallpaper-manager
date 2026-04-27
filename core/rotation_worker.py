@@ -92,7 +92,7 @@ class RotationWorker(QObject):
 
         # 使用 QTimer 而不是 QThread.sleep，这样不会阻塞 UI
         if self._timer is None:
-            self._timer = QTimer()
+            self._timer = QTimer(self)
             self._timer.timeout.connect(self._on_timer_tick)
 
         interval_ms = self._interval_minutes * 60 * 1000

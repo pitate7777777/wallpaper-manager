@@ -26,7 +26,7 @@ DB_PATH = DB_DIR / "wallpapers.db"
 #
 # 注意: 迁移函数按版本号升序依次执行，每个函数只负责从 v(N-1) → vN 的变更。
 
-SCHEMA_VERSION: int = 2
+SCHEMA_VERSION: int = 3
 
 
 def _migrate_v1(conn: sqlite3.Connection) -> None:
@@ -53,11 +53,17 @@ def _migrate_v2(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE wallpapers ADD COLUMN extra_data TEXT DEFAULT ''")
 
 
+def _migrate_v3(conn: sqlite3.Connection) -> None:
+    """v3: 新增 content_rating 索引，加速分级过滤查询。"""
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_content_rating ON wallpapers(content_rating)")
+
+
 # 迁移注册表: 版本号 → 迁移函数
 # 新增迁移时在此追加，例如: 3: _migrate_v3
 _MIGRATIONS: dict[int, callable] = {
     1: _migrate_v1,
     2: _migrate_v2,
+    3: _migrate_v3,
 }
 
 
@@ -225,32 +231,41 @@ def upsert_wallpaper(wp: Wallpaper) -> int:
     有意**不覆盖 is_favorite**，确保用户手动收藏的状态在重新扫描后不会丢失。
     """
     with get_connection() as conn:
-        cursor = conn.execute("""
-            INSERT INTO wallpapers (folder_path, workshop_id, title, wp_type, file,
-                                    preview, tags, content_rating, description,
-                                    scheme_color, extra_data, is_favorite)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(folder_path) DO UPDATE SET
-                workshop_id=excluded.workshop_id,
-                title=excluded.title,
-                wp_type=excluded.wp_type,
-                file=excluded.file,
-                preview=excluded.preview,
-                tags=excluded.tags,
-                content_rating=excluded.content_rating,
-                description=excluded.description,
-                scheme_color=excluded.scheme_color,
-                extra_data=excluded.extra_data
-                -- is_favorite 有意不更新，保留用户收藏状态
-        """, (
-            wp.folder_path, wp.workshop_id, wp.title, wp.wp_type,
-            wp.file, wp.preview, json.dumps(wp.tags, ensure_ascii=False),
-            wp.content_rating, wp.description, wp.scheme_color,
-            wp.extra_data, int(wp.is_favorite),
-        ))
-        wp_id = cursor.lastrowid
+        wp_id = _exec_upsert(conn, wp)
         conn.commit()
         return wp_id
+
+
+def _exec_upsert(conn: sqlite3.Connection, wp: Wallpaper) -> int:
+    """执行 upsert SQL（内部共享函数，供 upsert_wallpaper 和 scanner 共用）。
+
+    ON CONFLICT 策略同 upsert_wallpaper：不覆盖 is_favorite。
+    返回 lastrowid。
+    """
+    cursor = conn.execute("""
+        INSERT INTO wallpapers (folder_path, workshop_id, title, wp_type, file,
+                                preview, tags, content_rating, description,
+                                scheme_color, extra_data, is_favorite)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(folder_path) DO UPDATE SET
+            workshop_id=excluded.workshop_id,
+            title=excluded.title,
+            wp_type=excluded.wp_type,
+            file=excluded.file,
+            preview=excluded.preview,
+            tags=excluded.tags,
+            content_rating=excluded.content_rating,
+            description=excluded.description,
+            scheme_color=excluded.scheme_color,
+            extra_data=excluded.extra_data
+            -- is_favorite 有意不更新，保留用户收藏状态
+    """, (
+        wp.folder_path, wp.workshop_id, wp.title, wp.wp_type,
+        wp.file, wp.preview, json.dumps(wp.tags, ensure_ascii=False),
+        wp.content_rating, wp.description, wp.scheme_color,
+        wp.extra_data, int(wp.is_favorite),
+    ))
+    return cursor.lastrowid
 
 
 def toggle_favorite(wallpaper_id: int) -> bool:
@@ -294,8 +309,8 @@ def batch_set_favorite(wallpaper_ids: list[int], favorite: bool) -> int:
 
 
 def _escape_like(pattern: str) -> str:
-    """转义 LIKE 模式中的通配符 % 和 _"""
-    return re.sub(r'([%_])', r'\\\1', pattern)
+    """转义 LIKE 模式中的通配符 % 和 _（配合 ESCAPE '\\' 使用）"""
+    return re.sub(r'([%_\\])', r'\\\1', pattern)
 
 
 def query_wallpapers(
@@ -340,7 +355,7 @@ def query_wallpapers(
                 # 精确匹配：title 完全相等；tags 匹配 JSON 数组中的精确元素
                 # 用 %"<term>"% 确保匹配 JSON 字符串中的完整词，不会误匹配子串
                 escaped = _escape_like(search)
-                conditions.append('(title = ? OR tags LIKE ?)')
+                conditions.append('(title = ? OR tags LIKE ? ESCAPE \'\\\')')
                 params.extend([search, f'%"{escaped}%'])
             elif search_mode == "regex":
                 # 正则搜索：通过 SQLite REGEXP 函数在数据库侧过滤
@@ -355,7 +370,7 @@ def query_wallpapers(
             else:
                 # simple (默认，LIKE 匹配)
                 escaped = _escape_like(search)
-                conditions.append("(title LIKE ? OR tags LIKE ?)")
+                conditions.append("(title LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')")
                 params.extend([f"%{escaped}%", f"%{escaped}%"])
 
         if wp_type:
@@ -366,13 +381,13 @@ def query_wallpapers(
             if tags_mode == "all":
                 # 所有标签都必须匹配
                 for tag in tags:
-                    conditions.append("tags LIKE ?")
-                    params.append(f"%{tag}%")
+                    conditions.append("tags LIKE ? ESCAPE '\\'")
+                    params.append('%"' + _escape_like(tag) + '"%')
             else:
                 # 匹配任一标签
-                tag_conds = ["tags LIKE ?" for _ in tags]
+                tag_conds = ["tags LIKE ? ESCAPE '\\'" for _ in tags]
                 conditions.append(f"({' OR '.join(tag_conds)})")
-                params.extend([f"%{t}%" for t in tags])
+                params.extend(['%' + _escape_like(t) + '"%' for t in tags])
 
         if favorites_only:
             conditions.append("is_favorite = 1")
@@ -401,14 +416,15 @@ def query_wallpapers(
 
 
 def get_all_tags() -> list[str]:
-    """获取所有去重标签"""
+    """获取所有去重标签（使用 SQLite JSON 函数，避免 Python 端解析）"""
     with get_connection() as conn:
-        rows = conn.execute("SELECT tags FROM wallpapers WHERE tags != '[]'").fetchall()
-    tag_set = set()
-    for row in rows:
-        for tag in json.loads(row["tags"]):
-            tag_set.add(tag)
-    return sorted(tag_set)
+        # json_each 展开 JSON 数组，直接在 SQL 层去重
+        rows = conn.execute("""
+            SELECT DISTINCT value AS tag
+            FROM wallpapers, json_each(wallpapers.tags)
+            WHERE json_valid(tags) AND json_array_length(tags) > 0
+        """).fetchall()
+    return sorted(row["tag"] for row in rows)
 
 
 def get_all_ratings() -> list[str]:
@@ -460,24 +476,30 @@ def rename_tag(old_name: str, new_name: str) -> int:
     if not old_name or not new_name or old_name == new_name:
         return 0
 
-    count = 0
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, tags FROM wallpapers WHERE tags LIKE ?", (f'%"{old_name}"%',)
+            "SELECT id, tags FROM wallpapers WHERE tags LIKE ? ESCAPE '\\'",
+            ('%"' + _escape_like(old_name) + '"%',),
         ).fetchall()
+
+        # 收集所有待更新的 (id, new_tags_json) 对
+        updates = []
         for row in rows:
             tags = json.loads(row["tags"])
             if old_name in tags:
                 tags = [new_name if t == old_name else t for t in tags]
                 # 去重（保持顺序）
                 tags = list(dict.fromkeys(tags))
-                conn.execute(
-                    "UPDATE wallpapers SET tags = ? WHERE id = ?",
-                    (json.dumps(tags, ensure_ascii=False), row["id"]),
-                )
-                count += 1
+                updates.append((json.dumps(tags, ensure_ascii=False), row["id"]))
+
+        # 批量执行（单次事务提交）
+        if updates:
+            conn.executemany(
+                "UPDATE wallpapers SET tags = ? WHERE id = ?",
+                updates,
+            )
         conn.commit()
-    return count
+        return len(updates)
 
 
 def merge_tags(source_names: list[str], target_name: str) -> int:
@@ -501,16 +523,17 @@ def merge_tags(source_names: list[str], target_name: str) -> int:
         if not source_set:
             return 0
 
-    count = 0
     with get_connection() as conn:
         # 查找包含任一源标签的壁纸
-        like_conditions = " OR ".join(["tags LIKE ?" for _ in source_set])
-        like_params = [f'%"{s}"%' for s in source_set]
+        like_conditions = " OR ".join(["tags LIKE ? ESCAPE '\\'" for _ in source_set])
+        like_params = ['%"' + _escape_like(s) + '"%' for s in source_set]
         rows = conn.execute(
             f"SELECT id, tags FROM wallpapers WHERE {like_conditions}",
             like_params,
         ).fetchall()
 
+        # 收集所有待更新的 (id, new_tags_json) 对
+        updates = []
         for row in rows:
             tags = json.loads(row["tags"])
             if any(t in source_set for t in tags):
@@ -529,13 +552,16 @@ def merge_tags(source_names: list[str], target_name: str) -> int:
                     new_tags.append(target_name)
                 # 去重：保留顺序
                 new_tags = list(dict.fromkeys(new_tags))
-                conn.execute(
-                    "UPDATE wallpapers SET tags = ? WHERE id = ?",
-                    (json.dumps(new_tags, ensure_ascii=False), row["id"]),
-                )
-                count += 1
+                updates.append((json.dumps(new_tags, ensure_ascii=False), row["id"]))
+
+        # 批量执行（单次事务提交）
+        if updates:
+            conn.executemany(
+                "UPDATE wallpapers SET tags = ? WHERE id = ?",
+                updates,
+            )
         conn.commit()
-    return count
+        return len(updates)
 
 
 def update_wallpaper_tags(wallpaper_id: int, tags: list[str]):
@@ -577,19 +603,25 @@ def delete_tag(tag_name: str) -> int:
     if not tag_name:
         return 0
 
-    count = 0
     with get_connection() as conn:
         rows = conn.execute(
-            "SELECT id, tags FROM wallpapers WHERE tags LIKE ?", (f'%"{tag_name}"%',)
+            "SELECT id, tags FROM wallpapers WHERE tags LIKE ? ESCAPE '\\'",
+            ('%"' + _escape_like(tag_name) + '"%',),
         ).fetchall()
+
+        # 收集所有待更新的 (id, new_tags_json) 对
+        updates = []
         for row in rows:
             tags = json.loads(row["tags"])
             if tag_name in tags:
                 tags = [t for t in tags if t != tag_name]
-                conn.execute(
-                    "UPDATE wallpapers SET tags = ? WHERE id = ?",
-                    (json.dumps(tags, ensure_ascii=False), row["id"]),
-                )
-                count += 1
+                updates.append((json.dumps(tags, ensure_ascii=False), row["id"]))
+
+        # 批量执行（单次事务提交）
+        if updates:
+            conn.executemany(
+                "UPDATE wallpapers SET tags = ? WHERE id = ?",
+                updates,
+            )
         conn.commit()
-    return count
+        return len(updates)

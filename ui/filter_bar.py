@@ -483,6 +483,11 @@ class FilterBar(QWidget):
                 self.rating_combo.setCurrentIndex(idx)
         self.rating_combo.blockSignals(False)
 
+    def focus_search(self):
+        """供外部快捷键调用：聚焦搜索框"""
+        self.search_input.setFocus()
+        self.search_input.selectAll()
+
     def refresh_theme(self):
         """主题切换后刷新 inline 样式"""
         self._sep1.setStyleSheet(f"background: {COLORS['separator']};")

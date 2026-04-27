@@ -18,16 +18,25 @@ THUMB_SIZE = (320, 180)  # 16:9 统一尺寸
 # 缓存上限（默认 500MB），超出时按最久未访问淘汰
 MAX_CACHE_BYTES = 500 * 1024 * 1024
 
+# ─── 内存中的缓存大小追踪（增量更新，避免重复扫描磁盘）─────────────
+_current_cache_bytes: int | None = None  # None = 未初始化
+
 
 def get_thumb_path(preview_path: str) -> Path:
-    """根据原图路径生成缓存路径"""
+    """根据原图路径生成缓存路径（MD5 hash）"""
     h = hashlib.md5(preview_path.encode()).hexdigest()
     return THUMB_DIR / f"{h}.jpg"
 
 
 def _get_cache_size() -> int:
-    """获取当前缓存目录总大小（字节）。"""
+    """获取当前缓存目录总大小（字节）。仅在首次调用或需要精确值时扫描。"""
+    global _current_cache_bytes
+    if _current_cache_bytes is not None:
+        return _current_cache_bytes
+
+    # 首次调用：扫描整个目录
     if not THUMB_DIR.exists():
+        _current_cache_bytes = 0
         return 0
     total = 0
     for f in THUMB_DIR.glob("*.jpg"):
@@ -35,15 +44,28 @@ def _get_cache_size() -> int:
             total += f.stat().st_size
         except OSError:
             pass
+    _current_cache_bytes = total
     return total
+
+
+def _touch_thumb(path: Path) -> None:
+    """更新缩略图访问时间（供 LRU 排序），不改变内存计数器。"""
+    try:
+        os.utime(path)
+    except OSError:
+        pass
 
 
 def _evict_lru(max_bytes: int = MAX_CACHE_BYTES) -> int:
     """LRU 淘汰：按文件最后访问时间排序，删除最久未访问的文件直到低于上限。
 
+    使用内存中维护的缓存大小，避免重复扫描磁盘。
+
     Returns:
         删除的文件数量。
     """
+    global _current_cache_bytes
+
     if not THUMB_DIR.exists():
         return 0
 
@@ -75,6 +97,8 @@ def _evict_lru(max_bytes: int = MAX_CACHE_BYTES) -> int:
         except OSError as e:
             logger.warning(f"淘汰缩略图失败: {path} - {e}")
 
+    _current_cache_bytes = current_size
+
     if removed:
         freed_mb = (original_size - current_size) / 1024 / 1024
         remaining_mb = current_size / 1024 / 1024
@@ -94,6 +118,8 @@ def cleanup_thumbs(valid_preview_paths: set[str]) -> int:
     Returns:
         删除的文件数量。
     """
+    global _current_cache_bytes
+
     if not THUMB_DIR.exists():
         return 0
 
@@ -104,6 +130,8 @@ def cleanup_thumbs(valid_preview_paths: set[str]) -> int:
         if f not in valid_thumb_paths:
             try:
                 f.unlink()
+                if _current_cache_bytes is not None:
+                    _current_cache_bytes -= f.stat().st_size
                 removed += 1
             except OSError as e:
                 logger.warning(f"清理缩略图失败: {f} - {e}")
@@ -132,6 +160,10 @@ class ThumbnailWorker(QThread):
 
     def run(self):
         THUMB_DIR.mkdir(parents=True, exist_ok=True)
+
+        # 确保缓存大小已初始化
+        _get_cache_size()
+
         generated = 0
         total = len(self.wallpapers)
 
@@ -148,10 +180,7 @@ class ThumbnailWorker(QThread):
             thumb_path = get_thumb_path(preview_path)
             if not self.force and thumb_path.exists():
                 # 访问已有缓存文件，更新 atime（供 LRU 排序）
-                try:
-                    os.utime(thumb_path)
-                except OSError:
-                    pass
+                _touch_thumb(thumb_path)
                 continue
 
             try:
@@ -169,8 +198,15 @@ class ThumbnailWorker(QThread):
                 img.save(str(thumb_path), "JPEG", quality=85)
                 generated += 1
 
-                # 每生成 50 张检查一次缓存大小，超限时淘汰
-                if generated % 50 == 0:
+                # 增量更新内存中的缓存大小
+                global _current_cache_bytes
+                try:
+                    _current_cache_bytes = (_current_cache_bytes or 0) + thumb_path.stat().st_size
+                except OSError:
+                    pass
+
+                # 只有超过上限才触发淘汰（不再每 50 张检查）
+                if _current_cache_bytes > MAX_CACHE_BYTES:
                     _evict_lru()
 
             except Exception as e:

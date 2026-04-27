@@ -56,7 +56,7 @@ class Wallpaper:
 
     @property
     def type_emoji(self) -> str:
-        return {"video": "🎬", "scene": "🖼️", "web": "🌐"}.get(self.wp_type, "📄")
+        return TYPE_EMOJI.get(self.wp_type, "📄")
 
     @property
     def scheme_color_hex(self) -> str:

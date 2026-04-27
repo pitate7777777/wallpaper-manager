@@ -12,7 +12,7 @@ except PackageNotFoundError:
     # 开发模式下未安装包，从 pyproject.toml 读取
     # 兼容 Python 3.10（无 tomllib）和 3.11+（有 tomllib）
     _pyproject = Path(__file__).parent / "pyproject.toml"
-    __version__ = "0.0.0"
+    __version__ = "0.5.2"
     if _pyproject.exists():
         try:
             import tomllib

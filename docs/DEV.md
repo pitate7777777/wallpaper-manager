@@ -115,7 +115,7 @@ CREATE TABLE schema_version (
 
 `db.py` 内置了轻量级 schema 迁移框架：
 
-- `SCHEMA_VERSION` 常量标记当前 schema 版本（目前为 2）
+- `SCHEMA_VERSION` 常量标记当前 schema 版本（目前为 3）
 - `schema_version` 表记录数据库当前版本
 - `_run_migrations()` 在 `init_db()` 中自动检测版本差距并执行迁移
 - 新增迁移：编写 `_migrate_vN(conn)` 函数，注册到 `_MIGRATIONS` 字典
@@ -488,7 +488,7 @@ register_theme("ocean", { ... })
 python -m pytest tests/ -v
 ```
 
-当前 205 个测试用例（rotation_worker 12 个需 PySide6 显示环境）：
+当前 216 个测试用例（rotation_worker 12 个需 PySide6 显示环境）：
 
 | 文件 | 用例数 | 覆盖范围 |
 |------|--------|----------|
@@ -532,6 +532,32 @@ pip install PySide6-Multimedia
 3. **无自动更新机制** — 已集成 GitHub Release 版本检查，但需用户手动下载
 
 ## Code Review 记录
+
+### 2026-04-27 优化审查
+
+**本次变更范围：** 快捷键 / 缩略图缓存优化 / 数据库批量操作 / Schema v3
+
+**已修复问题：**
+
+| # | 严重度 | 文件 | 问题 | 修复 |
+|---|--------|------|------|------|
+| 1 | 🔴 高 | `thumbnail_worker.py` | `_touch_thumb` 访问已有缩略图时重复累加文件大小到 `_current_cache_bytes`，导致计数器漂移 | 移除 `_touch_thumb` 的返回值，仅更新 atime |
+| 2 | 🟡 中 | `thumbnail_worker.py` | 每生成 50 张缩略图调用 `_evict_lru()` → 全目录扫描 O(n) | 改为增量计数器，仅在超过上限时触发淘汰 |
+| 3 | 🟡 中 | `db.py` | `rename_tag/merge_tags/delete_tag` 逐条 UPDATE + commit，N 张壁纸 = N 次事务 | 收集所有更新后 `executemany` 批量执行 + 单事务 |
+| 4 | 🟡 中 | `db.py` | `get_all_tags()` 先加载全部记录到 Python 再逐条解析 JSON | 改用 SQLite `json_each()` 直接提取标签，零 Python 解析 |
+| 5 | 🟢 低 | `db.py` | Schema v2 迁移未建立 `content_rating` 索引 | 新增 Schema v3，添加 `idx_content_rating` |
+
+**新增功能：**
+- `MainWindow.keyPressEvent()` — 全局快捷键处理器
+- `FilterBar.focus_search()` — 聚焦搜索框外部调用方法
+- `PreviewDialog` — ←/→ 导航支持（传入壁纸列表 + 当前索引）
+
+**审查结论：**
+- 缩略图缓存计数器机制单线程安全（Qt QThread 默认串行执行）✅
+- `_current_cache_bytes` 在进程重启后由 `cleanup_thumbs()` 扫描重建，无累积漂移 ✅
+- 216 个测试全绿 ✅
+
+---
 
 ### 2026-04-26 全面审查
 

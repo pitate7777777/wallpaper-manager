@@ -678,7 +678,10 @@ class MainWindow(QMainWindow):
     def _open_preview(self, wallpaper_id: int):
         wp = next((w for w in self._current_wallpapers if w.id == wallpaper_id), None)
         if wp:
-            dlg = PreviewDialog(wp, self)
+            # 计算当前壁纸在列表中的索引
+            ids = [w.id for w in self._current_wallpapers]
+            idx = ids.index(wallpaper_id) if wallpaper_id in ids else 0
+            dlg = PreviewDialog(wp, self._current_wallpapers, idx, self)
             dlg.favorite_toggled.connect(self._on_favorite_toggled)
             dlg.exec()
 
@@ -945,3 +948,67 @@ class MainWindow(QMainWindow):
                     worker.cancel()
                 worker.wait(2000)
         super().closeEvent(event)
+
+    def keyPressEvent(self, event):
+        """全局快捷键处理"""
+        key = event.key()
+        mods = event.modifiers()
+
+        # Ctrl+F — 聚焦搜索框
+        if key == Qt.Key_F and mods == Qt.ControlModifier:
+            self.filter_bar.focus_search()
+            event.accept()
+            return
+
+        # F5 — 刷新/扫描
+        if key == Qt.Key_F5:
+            self._on_scan()
+            event.accept()
+            return
+
+        # Ctrl+A — 全选当前过滤结果
+        if key == Qt.Key_A and mods == Qt.ControlModifier:
+            self._select_all()
+            event.accept()
+            return
+
+        # Delete — 删除选中项（需确认）
+        if key == Qt.Key_Delete and self._selected_ids:
+            self._delete_selected()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
+
+    def _select_all(self):
+        """全选当前过滤结果"""
+        for wp in self._current_wallpapers:
+            self._selected_ids.add(wp.id)
+            if wp.id in self._cards:
+                self._cards[wp.id].set_selected(True)
+        self._update_selection_ui()
+
+    def _delete_selected(self):
+        """删除选中的壁纸记录（需确认）"""
+        if not self._selected_ids:
+            return
+        count = len(self._selected_ids)
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除选中的 {count} 项壁纸记录吗？\n\n注意：此操作不会删除磁盘上的文件。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        removed = 0
+        for wp_id in list(self._selected_ids):
+            wp = next((w for w in self._current_wallpapers if w.id == wp_id), None)
+            if wp:
+                db.remove_wallpaper(wp.folder_path)
+                removed += 1
+        self.status_bar.showMessage(f"🗑️ 已删除 {removed} 项记录", 3000)
+        self._clear_selection()
+        self._load_data()
+        self._start_thumbnail_generation()

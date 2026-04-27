@@ -25,9 +25,11 @@ class PreviewDialog(QDialog):
 
     favorite_toggled = Signal(int)  # wallpaper id
 
-    def __init__(self, wallpaper: Wallpaper, parent=None):
+    def __init__(self, wallpaper: Wallpaper, wallpapers: list[Wallpaper] = None, current_index: int = 0, parent=None):
         super().__init__(parent)
         self.wallpaper = wallpaper
+        self.wallpapers = wallpapers or [wallpaper]
+        self.current_index = current_index
         self._player = None
         self._audio_output = None
         self._original_pixmap: QPixmap | None = None  # 缓存原始 QPixmap，resize 时直接缩放
@@ -41,6 +43,9 @@ class PreviewDialog(QDialog):
 
         # ESC 关闭
         QShortcut(QKeySequence(Qt.Key_Escape), self, self.close)
+        # ← → 导航
+        QShortcut(QKeySequence(Qt.Key_Left), self, self._prev_wallpaper)
+        QShortcut(QKeySequence(Qt.Key_Right), self, self._next_wallpaper)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -305,9 +310,65 @@ class PreviewDialog(QDialog):
                 self._resize_timer.timeout.connect(self._load_preview_image)
             self._resize_timer.start(100)
 
+    def _prev_wallpaper(self):
+        """切换到上一张壁纸"""
+        if len(self.wallpapers) <= 1:
+            return
+        self.current_index = (self.current_index - 1) % len(self.wallpapers)
+        self._switch_to_wallpaper(self.wallpapers[self.current_index])
+
+    def _next_wallpaper(self):
+        """切换到下一张壁纸"""
+        if len(self.wallpapers) <= 1:
+            return
+        self.current_index = (self.current_index + 1) % len(self.wallpapers)
+        self._switch_to_wallpaper(self.wallpapers[self.current_index])
+
+    def _switch_to_wallpaper(self, wallpaper: Wallpaper):
+        """切换显示的壁纸内容"""
+        # 停止当前视频
+        if self._player:
+            self._player.stop()
+        # 更新数据
+        self.wallpaper = wallpaper
+        self._original_pixmap = None
+        # 重置视频组件（重新创建）
+        self._player = None
+        self._audio_output = None
+        # 重新设置视频页
+        self._setup_video_player()
+        # 更新 UI 文本
+        self.setWindowTitle(f"📋 {wallpaper.title}")
+        self.title_label.setText(
+            f"<b style='color:{COLORS['text_primary']}'>标题:</b> <span style='color:{COLORS['text_secondary']}'>{wallpaper.title}</span>"
+        )
+        self.type_label.setText(
+            f"<b style='color:{COLORS['text_primary']}'>类型:</b> <span style='color:{COLORS['text_secondary']}'>{wallpaper.type_emoji} {wallpaper.wp_type}</span>"
+        )
+        self.tags_label.setText(
+            f"<b style='color:{COLORS['text_primary']}'>标签:</b> <span style='color:{COLORS['text_secondary']}'>{wallpaper.tags_display or '无'}</span>"
+        )
+        self.rating_label.setText(
+            f"<b style='color:{COLORS['text_primary']}'>分级:</b> <span style='color:{COLORS['text_secondary']}'>{self._rating_display(wallpaper.content_rating)}</span>"
+        )
+        self.file_label.setText(
+            f"<b style='color:{COLORS['text_primary']}'>文件:</b> <span style='color:{COLORS['text_secondary']}'>{wallpaper.file}</span>"
+        )
+        self.workshop_label.setText(
+            f"<b style='color:{COLORS['text_primary']}'>工坊 ID:</b> <span style='color:{COLORS['text_secondary']}'>{wallpaper.workshop_id}</span>"
+        )
+        self.fav_btn.setText("❤️ 已收藏" if wallpaper.is_favorite else "🤍 收藏")
+        # 重新加载内容
+        self._load_content()
+
     def closeEvent(self, event):
         """关闭时停止视频播放并释放资源"""
         if self._player:
             self._player.stop()
             self._player.setVideoOutput(None)
+            self._player.deleteLater()
+            self._player = None
+        if self._audio_output:
+            self._audio_output.deleteLater()
+            self._audio_output = None
         super().closeEvent(event)

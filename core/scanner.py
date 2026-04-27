@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Optional
 
-from .db import upsert_wallpaper, remove_wallpaper, get_connection
+from .db import upsert_wallpaper, remove_wallpaper, get_connection, _exec_upsert
 from .models import Wallpaper
 
 logger = logging.getLogger(__name__)
@@ -155,28 +155,7 @@ def scan_directory(
                     stats["errors"] += 1
                     continue
                 try:
-                    conn.execute("""
-                        INSERT INTO wallpapers (folder_path, workshop_id, title, wp_type, file,
-                                                preview, tags, content_rating, description,
-                                                scheme_color, extra_data, is_favorite)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(folder_path) DO UPDATE SET
-                            workshop_id=excluded.workshop_id,
-                            title=excluded.title,
-                            wp_type=excluded.wp_type,
-                            file=excluded.file,
-                            preview=excluded.preview,
-                            tags=excluded.tags,
-                            content_rating=excluded.content_rating,
-                            description=excluded.description,
-                            scheme_color=excluded.scheme_color,
-                            extra_data=excluded.extra_data
-                    """, (
-                        wp.folder_path, wp.workshop_id, wp.title, wp.wp_type,
-                        wp.file, wp.preview, json.dumps(wp.tags, ensure_ascii=False),
-                        wp.content_rating, wp.description, wp.scheme_color,
-                        wp.extra_data, int(wp.is_favorite),
-                    ))
+                    _exec_upsert(conn, wp)
                     if folder_path_str in existing:
                         stats["updated"] += 1
                     else:
